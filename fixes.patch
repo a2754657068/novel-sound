@@ -1,0 +1,2182 @@
+diff --git a/android/app/build.gradle.kts b/android/app/build.gradle.kts
+index 918ab30..279407e 100644
+--- a/android/app/build.gradle.kts
++++ b/android/app/build.gradle.kts
+@@ -39,6 +39,13 @@ val hasReleaseSigning = listOf(
+     releaseKeyPassword,
+ ).all { it != null }
+ 
++// 与官方原版共存：FQAPP_COEXIST=true 时换一个 applicationId 与显示名，
++// 这样同一台手机上可以同时装原版和本修改版（互不覆盖、数据各自独立）。
++// 默认保持上游的 com.fqapp.fqapp / 「什锦铺」，不影响正常构建。
++val coexistBuild = System.getenv("FQAPP_COEXIST")?.toBoolean() == true
++val appIdForBuild = if (coexistBuild) "com.fqapp.fqapp.mod" else "com.fqapp.fqapp"
++val appLabelForBuild = if (coexistBuild) "什锦铺·改" else "什锦铺"
++
+ android {
+     namespace = "com.fqapp.fqapp"
+     compileSdk = flutter.compileSdkVersion
+@@ -59,7 +66,8 @@ android {
+ 
+     defaultConfig {
+         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
+-        applicationId = "com.fqapp.fqapp"
++        applicationId = appIdForBuild
++        manifestPlaceholders["appLabel"] = appLabelForBuild
+         // You can update the following values to match your application needs.
+         // For more information, see: https://flutter.dev/to/review-gradle-config.
+         minSdk = flutter.minSdkVersion
+diff --git a/android/app/src/main/AndroidManifest.xml b/android/app/src/main/AndroidManifest.xml
+index 76541d2..7022d3f 100644
+--- a/android/app/src/main/AndroidManifest.xml
++++ b/android/app/src/main/AndroidManifest.xml
+@@ -15,7 +15,7 @@
+     <!-- Device identity and reading data stay on-device; see
+          .agents/notes/implemented/bug-fix/2026-09-18-home-geometry-and-backup.md -->
+     <application
+-        android:label="什锦铺"
++        android:label="${appLabel}"
+         android:name="${applicationName}"
+         android:icon="@mipmap/ic_launcher"
+         android:roundIcon="@mipmap/ic_launcher_round"
+diff --git a/ios/Flutter/Debug.xcconfig b/ios/Flutter/Debug.xcconfig
+index 571f134..aaf323a 100644
+--- a/ios/Flutter/Debug.xcconfig
++++ b/ios/Flutter/Debug.xcconfig
+@@ -14,6 +14,6 @@
+ //   2) DEAD_CODE_STRIPPING=NO：Release 默认的 dead_strip 会把「无人引用、只在运行时 dlsym」的符号删掉；
+ //   3) -Wl,-export_dynamic：主可执行文件默认不导出全局符号，dlsym 会找不到 Rust 入口。
+ // STRIP_INSTALLED_PRODUCT=NO 用于避免安装期 strip 再把符号表裁掉。
+-OTHER_LDFLAGS = $(inherited) -force_load $(SRCROOT)/Frameworks/libfqapi_core.a -framework Security -framework CoreFoundation -Wl,-export_dynamic
++OTHER_LDFLAGS = $(inherited) -force_load $(SRCROOT)/Frameworks/libfqapi_core.a -framework Security -framework CoreFoundation -Wl,-export_dynamic -liconv
+ DEAD_CODE_STRIPPING = NO
+ STRIP_INSTALLED_PRODUCT = NO
+diff --git a/ios/Flutter/Release.xcconfig b/ios/Flutter/Release.xcconfig
+index 696ac29..caab181 100644
+--- a/ios/Flutter/Release.xcconfig
++++ b/ios/Flutter/Release.xcconfig
+@@ -14,6 +14,6 @@
+ //   2) DEAD_CODE_STRIPPING=NO：Release 默认的 dead_strip 会把「无人引用、只在运行时 dlsym」的符号删掉；
+ //   3) -Wl,-export_dynamic：主可执行文件默认不导出全局符号，dlsym 会找不到 Rust 入口。
+ // STRIP_INSTALLED_PRODUCT=NO 用于避免安装期 strip 再把符号表裁掉。
+-OTHER_LDFLAGS = $(inherited) -force_load $(SRCROOT)/Frameworks/libfqapi_core.a -framework Security -framework CoreFoundation -Wl,-export_dynamic
++OTHER_LDFLAGS = $(inherited) -force_load $(SRCROOT)/Frameworks/libfqapi_core.a -framework Security -framework CoreFoundation -Wl,-export_dynamic -liconv
+ DEAD_CODE_STRIPPING = NO
+ STRIP_INSTALLED_PRODUCT = NO
+diff --git a/ios/Podfile.lock b/ios/Podfile.lock
+index c527f74..dbc0f6e 100644
+--- a/ios/Podfile.lock
++++ b/ios/Podfile.lock
+@@ -10,6 +10,8 @@ PODS:
+     - Flutter
+   - integration_test (0.0.1):
+     - Flutter
++  - media_kit_libs_ios_video (1.0.4):
++    - Flutter
+   - media_kit_video (0.0.1):
+     - Flutter
+   - package_info_plus (0.4.5):
+@@ -32,6 +34,7 @@ DEPENDENCIES:
+   - flutter_secure_storage (from `.symlinks/plugins/flutter_secure_storage/ios`)
+   - flutter_tts (from `.symlinks/plugins/flutter_tts/ios`)
+   - integration_test (from `.symlinks/plugins/integration_test/ios`)
++  - media_kit_libs_ios_video (from `.symlinks/plugins/media_kit_libs_ios_video/ios`)
+   - media_kit_video (from `.symlinks/plugins/media_kit_video/ios`)
+   - package_info_plus (from `.symlinks/plugins/package_info_plus/ios`)
+   - shared_preferences_foundation (from `.symlinks/plugins/shared_preferences_foundation/darwin`)
+@@ -52,6 +55,8 @@ EXTERNAL SOURCES:
+     :path: ".symlinks/plugins/flutter_tts/ios"
+   integration_test:
+     :path: ".symlinks/plugins/integration_test/ios"
++  media_kit_libs_ios_video:
++    :path: ".symlinks/plugins/media_kit_libs_ios_video/ios"
+   media_kit_video:
+     :path: ".symlinks/plugins/media_kit_video/ios"
+   package_info_plus:
+@@ -66,19 +71,20 @@ EXTERNAL SOURCES:
+     :path: ".symlinks/plugins/wakelock_plus/ios"
+ 
+ SPEC CHECKSUMS:
+-  connectivity_plus: cb623214f4e1f6ef8fe7403d580fdad517d2f7dd
+-  file_selector_ios: fb1dd93b450e9c1ac595c0c8cf29cc855ea24d61
++  connectivity_plus: 2a701ffec2c0ae28a48cf7540e279787e77c447d
++  file_selector_ios: 8e1d792478f6af248b8b601e3e0f02eb74a19c02
+   Flutter: 71a624a5bc0c04062bf19101d501e466baf2fb47
+-  flutter_secure_storage: 1ed9476fba7e7a782b22888f956cce43e2c62f13
+-  flutter_tts: 35ac3c7d42412733e795ea96ad2d7e05d0a75113
+-  integration_test: 4a889634ef21a45d28d50d622cf412dc6d9f586e
+-  media_kit_video: f3b0d035d89def15cfbbcf7dc2ae278f201e2f83
+-  package_info_plus: af8e2ca6888548050f16fa2f1938db7b5a5df499
+-  shared_preferences_foundation: a7c3904f2dedb3701dd1903cb152ef5e7df92422
+-  sqflite_darwin: 20b2a3a3b70e43edae938624ce550a3cbf66a3d0
+-  url_launcher_ios: 7a95fa5b60cc718a708b8f2966718e93db0cef1b
+-  wakelock_plus: e29112ab3ef0b318e58cfa5c32326458be66b556
++  flutter_secure_storage: d33dac7ae2ea08509be337e775f6b59f1ff45f12
++  flutter_tts: 91ad1884033cd95ef6e9338754adad54f01f090f
++  integration_test: 252f60fa39af5e17c3aa9899d35d908a0721b573
++  media_kit_libs_ios_video: a5fe24bc7875ccd6378a0978c13185e1344651c1
++  media_kit_video: 5da63f157170e5bf303bf85453b7ef6971218a2e
++  package_info_plus: c0502532a26c7662a62a356cebe2692ec5fe4ec4
++  shared_preferences_foundation: 9a36184bb1299692bf7b972bd6c60ab373084504
++  sqflite_darwin: 5a7236e3b501866c1c9befc6771dfd73ffb8702d
++  url_launcher_ios: bb13df5870e8c4234ca12609d04010a21be43dfa
++  wakelock_plus: 76957ab028e12bfa4e66813c99e46637f367fc7e
+ 
+-PODFILE CHECKSUM: 3ba3a73b1b12adcf321a227a745625fe0888cc82
++PODFILE CHECKSUM: 73ff340a7f097999a71c22f1a83b76cc1dda8629
+ 
+ COCOAPODS: 1.17.0
+diff --git a/ios/Runner/AppDelegate.swift b/ios/Runner/AppDelegate.swift
+index ac0ff6b..46cf6c5 100644
+--- a/ios/Runner/AppDelegate.swift
++++ b/ios/Runner/AppDelegate.swift
+@@ -1,6 +1,7 @@
+ import Flutter
+ import Security
+ import UIKit
++import WebKit
+ 
+ @main
+ @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
+@@ -13,7 +14,10 @@ import UIKit
+ 
+   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
+     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+-    SecureKeyBridge.register(messenger: engineBridge.applicationRegistrar.messenger())
++    let messenger = engineBridge.applicationRegistrar.messenger()
++    SecureKeyBridge.register(messenger: messenger)
++    FanqieLoginBridge.register(messenger: messenger)
++    IosFilesBridge.register(messenger: messenger)
+   }
+ }
+ 
+@@ -115,3 +119,280 @@ struct KeychainError: LocalizedError {
+     SecCopyErrorMessageString(status, nil) as String? ?? "Keychain 错误 \(status)"
+   }
+ }
++
++// MARK: - 番茄登录窗口（iOS）
++
++/// 番茄书架采集的登录入口。
++///
++/// Android 有原生登录页，Windows/Linux 用 `webview_windows`；iOS 上两者都没有，
++/// 这里用 `WKWebView` 打开官方登录页，用户完成登录后点「读取书架」，把
++/// `fanqienovel.com` 的 cookie 交回 Dart（`FanqieLibraryCaptureService.collect`
++/// 拿到 cookie 后由 Rust/Dart 侧直接请求采集接口）。
++///
++/// 与桌面版同一套约束：只允许官方域名（离开就拦下并提示），读取时要求存在
++/// `sessionid` / `sessionid_ss` / `sid_tt` 之一且非空，整串不超过 12 KB。
++final class FanqieLoginBridge: NSObject {
++  private static let allowedHosts = [
++    "fanqienovel.com", "snssdk.com", "bytedance.com", "zijieapi.com",
++  ]
++  private static let loginURL = URL(string: "https://fanqienovel.com/main/writer/login")!
++  private static var active: FanqieLoginBridge?
++
++  private let result: FlutterResult
++  private let webView = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
++  private let controller = UIViewController()
++  private var finished = false
++
++  private init(result: @escaping FlutterResult) {
++    self.result = result
++    super.init()
++  }
++
++  static func register(messenger: FlutterBinaryMessenger) {
++    let channel = FlutterMethodChannel(name: "fqapp/fanqie_account", binaryMessenger: messenger)
++    channel.setMethodCallHandler { call, result in
++      switch call.method {
++      case "login":
++        let arguments = call.arguments as? [String: Any] ?? [:]
++        let dark = arguments["dark"] as? Bool ?? false
++        DispatchQueue.main.async {
++          login(dark: dark, result: result)
++        }
++      case "cancelLogin":
++        DispatchQueue.main.async {
++          active?.finish(nil, result: nil)
++          result(nil)
++        }
++      case "clearSession":
++        DispatchQueue.main.async {
++          clearSession(completion: { result(nil) })
++        }
++      default:
++        result(FlutterMethodNotImplemented)
++      }
++    }
++  }
++
++  private static func login(dark: Bool, result: @escaping FlutterResult) {
++    guard active == nil else {
++      result(FlutterError(code: "BUSY", message: "登录窗口已打开", details: nil))
++      return
++    }
++    guard let host = topViewController() else {
++      result(FlutterError(code: "NO_WINDOW", message: "窗口尚未就绪", details: nil))
++      return
++    }
++    let bridge = FanqieLoginBridge(result: result)
++    active = bridge
++    bridge.present(from: host, dark: dark)
++  }
++
++  private func present(from host: UIViewController, dark: Bool) {
++    controller.view.backgroundColor = .systemBackground
++    controller.title = "番茄登录"
++    controller.navigationItem.leftBarButtonItem = UIBarButtonItem(
++      title: "取消", style: .plain, target: self, action: #selector(cancelTapped))
++    controller.navigationItem.rightBarButtonItem = UIBarButtonItem(
++      title: "读取书架", style: .done, target: self, action: #selector(readTapped))
++
++    webView.translatesAutoresizingMaskIntoConstraints = false
++    webView.navigationDelegate = self
++    webView.allowsBackForwardNavigationGestures = false
++    controller.view.addSubview(webView)
++    NSLayoutConstraint.activate([
++      webView.topAnchor.constraint(equalTo: controller.view.safeAreaLayoutGuide.topAnchor),
++      webView.bottomAnchor.constraint(equalTo: controller.view.bottomAnchor),
++      webView.leadingAnchor.constraint(equalTo: controller.view.leadingAnchor),
++      webView.trailingAnchor.constraint(equalTo: controller.view.trailingAnchor),
++    ])
++    if dark {
++      controller.overrideUserInterfaceStyle = .dark
++      webView.overrideUserInterfaceStyle = .dark
++    }
++    let navigation = UINavigationController(rootViewController: controller)
++    navigation.modalPresentationStyle = .pageSheet
++    host.present(navigation, animated: true)
++    webView.load(URLRequest(url: Self.loginURL))
++  }
++
++  @objc private func cancelTapped() {
++    finish(nil, result: result, dismissedByUser: true)
++  }
++
++  @objc private func readTapped() {
++    webView.evaluateJavaScript("document.title") { [weak self] _, _ in
++      self?.readCookies()
++    }
++  }
++
++  private func readCookies() {
++    WKWebsiteDataStore.default().httpCookieStore.getAllCookies { [weak self] cookies in
++      guard let self else { return }
++      let scoped = cookies.filter { cookie in
++        let domain = cookie.domain.hasPrefix(".")
++          ? String(cookie.domain.dropFirst()) : cookie.domain
++        return domain == "fanqienovel.com" || domain.hasSuffix(".fanqienovel.com")
++      }
++      let names = ["sessionid", "sessionid_ss", "sid_tt"]
++      let hasLogin = scoped.contains { cookie in
++        names.contains(cookie.name) && !cookie.value.isEmpty
++      }
++      guard hasLogin else {
++        DispatchQueue.main.async { self.alert("尚未取得登录态", "请先在官方页面完成登录与验证，再点「读取书架」。") }
++        return
++      }
++      let value = scoped.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
++      guard value.utf8.count <= 12 * 1024 else {
++        DispatchQueue.main.async { self.alert("登录态过大", "读取失败，请重试。") }
++        return
++      }
++      DispatchQueue.main.async { self.finish(value, result: self.result) }
++    }
++  }
++
++  private func alert(_ title: String, _ message: String) {
++    let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
++    alert.addAction(UIAlertAction(title: "好", style: .default))
++    controller.present(alert, animated: true)
++  }
++
++  /// 关闭窗口并把结果交回 Dart；`finished` 保证只回调一次。
++  private func finish(_ value: String?, result: FlutterResult?, dismissedByUser: Bool = false) {
++    guard !finished else { return }
++    finished = true
++    Self.active = nil
++    let navigation = controller.navigationController
++    let complete = {
++      result?(value)
++    }
++    if dismissedByUser, let navigation {
++      navigation.dismiss(animated: true) { complete() }
++    } else {
++      navigation?.dismiss(animated: true) { complete() }
++    }
++  }
++
++  private static func clearSession(completion: @escaping () -> Void) {
++    let store = WKWebsiteDataStore.default()
++    store.httpCookieStore.getAllCookies { cookies in
++      let targets = cookies.filter { cookie in
++        let domain = cookie.domain.hasPrefix(".") ? String(cookie.domain.dropFirst()) : cookie.domain
++        return domain == "fanqienovel.com" || domain.hasSuffix(".fanqienovel.com")
++      }
++      let group = DispatchGroup()
++      for cookie in targets {
++        group.enter()
++        store.httpCookieStore.delete(cookie) { group.leave() }
++      }
++      group.notify(queue: .main) { completion() }
++    }
++  }
++
++  static func topViewController() -> UIViewController? {
++    let scenes = UIApplication.shared.connectedScenes
++      .compactMap { $0 as? UIWindowScene }
++    let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
++    var top = scene?.windows.first(where: { $0.isKeyWindow })?.rootViewController
++      ?? scene?.windows.first?.rootViewController
++    while let presented = top?.presentedViewController {
++      top = presented
++    }
++    return top
++  }
++}
++
++extension FanqieLoginBridge: WKNavigationDelegate {
++  func webView(
++    _ webView: WKWebView,
++    decidePolicyFor navigationAction: WKNavigationAction,
++    decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
++  ) {
++    guard let url = navigationAction.request.url else {
++      decisionHandler(.cancel)
++      return
++    }
++    if url.scheme != "https" || url.user != nil || url.password != nil {
++      decisionHandler(.cancel)
++      return
++    }
++    let host = url.host ?? ""
++    let allowed = FanqieLoginBridge.allowedHosts.contains { entry in
++      host == entry || host.hasSuffix(".\(entry)")
++    }
++    if allowed {
++      decisionHandler(.allow)
++    } else {
++      decisionHandler(.cancel)
++      alert("已拦截跳转", "请留在番茄官方登录页面完成登录。")
++    }
++  }
++}
++
++// MARK: - 文件导出（iOS 分享面板）
++
++/// `saveBackup` / `exportFanqieCapture` / `saveText` 在桌面上弹「另存为」，
++/// iOS 没有等价的选择器，改为写临时文件再弹系统分享面板（存储到「文件」、
++/// 发微信、AirDrop 都行）。Dart 侧拿到的是临时文件路径。
++final class IosFilesBridge {
++  static func register(messenger: FlutterBinaryMessenger) {
++    let channel = FlutterMethodChannel(name: "fqapp/ios_files", binaryMessenger: messenger)
++    channel.setMethodCallHandler { call, result in
++      guard call.method == "saveFile" else {
++        result(FlutterMethodNotImplemented)
++        return
++      }
++      guard let arguments = call.arguments as? [String: Any],
++        let name = arguments["name"] as? String,
++        let data = arguments["bytes"] as? FlutterStandardTypedData
++      else {
++        result(FlutterError(code: "BAD_ARGUMENT", message: "缺少文件内容", details: nil))
++        return
++      }
++      presentShare(name: name, data: data.data, result: result)
++    }
++  }
++
++  private static func presentShare(
++    name: String, data: Data, result: @escaping FlutterResult
++  ) {
++    let directory = FileManager.default.temporaryDirectory
++      .appendingPathComponent("fqapp-share", isDirectory: true)
++    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
++    let url = directory.appendingPathComponent(sanitize(name))
++    do {
++      try data.write(to: url, options: .atomic)
++    } catch {
++      result(FlutterError(code: "WRITE", message: error.localizedDescription, details: nil))
++      return
++    }
++    DispatchQueue.main.async {
++      guard let host = FanqieLoginBridge.topViewController() else {
++        result(FlutterError(code: "NO_WINDOW", message: "窗口尚未就绪", details: nil))
++        return
++      }
++      let activity = UIActivityViewController(activityItems: [url], applicationActivities: nil)
++      if let popover = activity.popoverPresentationController,
++        UIDevice.current.userInterfaceIdiom == .pad
++      {
++        popover.sourceView = host.view
++        popover.sourceRect = CGRect(
++          x: host.view.bounds.midX, y: host.view.bounds.midY, width: 0, height: 0)
++        popover.permittedArrowDirections = []
++      }
++      var reported = false
++      activity.completionWithItemsHandler = { _, _, _, _ in
++        guard !reported else { return }
++        reported = true
++        result(url.path)
++      }
++      host.present(activity, animated: true)
++    }
++  }
++
++  private static func sanitize(_ name: String) -> String {
++    let cleaned = name.replacingOccurrences(
++      of: "[\\\\/:*?\"<>|]", with: "_", options: .regularExpression)
++    let trimmed = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
++    return trimmed.isEmpty ? "fqapp-export" : trimmed
++  }
++}
+diff --git a/ios/Runner/Info.plist b/ios/Runner/Info.plist
+index d075e94..d9abea7 100644
+--- a/ios/Runner/Info.plist
++++ b/ios/Runner/Info.plist
+@@ -49,6 +49,10 @@
+ 	</dict>
+ 	<key>UIApplicationSupportsIndirectInputEvents</key>
+ 	<true/>
++	<key>UIBackgroundModes</key>
++	<array>
++		<string>audio</string>
++	</array>
+ 	<key>UILaunchStoryboardName</key>
+ 	<string>LaunchScreen</string>
+ 	<key>UIMainStoryboardFile</key>
+diff --git a/lib/main.dart b/lib/main.dart
+index 6909785..6dd271f 100644
+--- a/lib/main.dart
++++ b/lib/main.dart
+@@ -15,6 +15,7 @@ import 'package:hive_ce_flutter/hive_flutter.dart';
+ 
+ import 'dart:async';
+ 
++import 'services/ios_platform.dart';
+ import 'services/linux_platform.dart';
+ 
+ import 'pages/home_page.dart';
+@@ -91,6 +92,8 @@ Future<void> _prepareRuntime() async {
+   registerPortedUiLicenses();
+   if (isLinuxDesktop) await LinuxPlatform.install();
+   if (isWindowsDesktop) await DesktopPlatform.instance.initialize();
++  // iOS 没有原生播放器通道：把 fqapp/native_player 接到进程内的 media_kit。
++  if (isIOSDevice) await IosPlatform.install();
+   // 应用内日志：接管 debugPrint 与 FlutterError.onError，未处理异步异常由
+   // [main] 的 runZonedGuarded 捕获；文件持久化异步开启，失败只退回内存模式。
+   AppLog.instance.install();
+diff --git a/lib/pages/category_page.dart b/lib/pages/category_page.dart
+index e92daf4..0ae6597 100644
+--- a/lib/pages/category_page.dart
++++ b/lib/pages/category_page.dart
+@@ -212,7 +212,7 @@ class _CategoryPageState extends State<CategoryPage> {
+     });
+   }
+ 
+-  void _openSearch({String? query}) {
++  void _openSearch({String? query, String? tag}) {
+     final category = switch (_tabValue) {
+       3 => SearchCategory.audio,
+       5 => SearchCategory.manga,
+@@ -223,7 +223,11 @@ class _CategoryPageState extends State<CategoryPage> {
+       SearchRoute.open<void>(
+         context,
+         builder: (_) =>
+-            SearchPage(initialQuery: query, initialCategory: category),
++            SearchPage(
++              initialQuery: query,
++              initialTag: tag,
++              initialCategory: category,
++            ),
+       ),
+     );
+   }
+@@ -285,7 +289,7 @@ class _CategoryPageState extends State<CategoryPage> {
+                           child: _SectionList(
+                             state: this,
+                             columns: columns,
+-                            onSearch: (name) => _openSearch(query: name),
++                            onSearch: (name) => _openSearch(tag: name),
+                           ),
+                         ),
+                       ],
+diff --git a/lib/pages/drama_page.dart b/lib/pages/drama_page.dart
+index fb82bfe..82eef6c 100644
+--- a/lib/pages/drama_page.dart
++++ b/lib/pages/drama_page.dart
+@@ -1,5 +1,6 @@
+ import '../widgets/video_player_chrome.dart';
+ import '../services/desktop_platform.dart';
++import '../services/ios_platform.dart';
+ 
+ import 'dart:async';
+ 
+@@ -4280,7 +4281,7 @@ class _InlineVideoLayer extends StatelessWidget {
+                     rect: layout.video,
+                     child: RotatedBox(
+                       quarterTurns: playback.rotation.value,
+-                      child: isWindowsDesktop
++                      child: isWindowsDesktop || isIOSDevice
+                           ? DesktopPlatform.instance.videoSurface(
+                               textureId,
+                               key: ValueKey('drama_inline_${item.id}'),
+diff --git a/lib/pages/library_page_actions.dart b/lib/pages/library_page_actions.dart
+index d74a6b0..4a35116 100644
+--- a/lib/pages/library_page_actions.dart
++++ b/lib/pages/library_page_actions.dart
+@@ -200,10 +200,25 @@ mixin _LibraryPageActions on _LibraryPageStateBase {
+       if (!mounted) return;
+       _load();
+       _showSnack('已导入《${book.title}》');
+-    } catch (e) {
++    } catch (e, stack) {
++      // 原始异常先落日志（可能带本地路径），界面上只留一句可复述的摘要：
++      // 这条路径在 iOS 上曾经只有「请重试」，等于没有线索。
++      AppLog.d('library-import', 'import failed: ${e.runtimeType} $e\n$stack');
+       if (mounted) {
+-        final message = e is FormatException ? e.message : '请重试';
+-        _showSnack('导入失败：$message');
++        final detail = switch (e) {
++          FormatException(:final message) => message,
++          PlatformException(:final message)
++              when message != null && message.isNotEmpty =>
++            message,
++          MissingPluginException(:final message)
++              when message != null && message.isNotEmpty =>
++            message,
++          _ => '${e.runtimeType}: $e',
++        };
++        final oneLine = detail.replaceAll(RegExp(r'\s+'), ' ').trim();
++        _showSnack(
++          '导入失败：${oneLine.length > 140 ? '${oneLine.substring(0, 140)}…' : oneLine}',
++        );
+       }
+     } finally {
+       if (mounted) setState(() => _importingBook = false);
+diff --git a/lib/pages/player_page.dart b/lib/pages/player_page.dart
+index 218cac9..6ccfda3 100644
+--- a/lib/pages/player_page.dart
++++ b/lib/pages/player_page.dart
+@@ -1,4 +1,5 @@
+ import '../services/desktop_platform.dart';
++import '../services/ios_platform.dart';
+ import '../services/audio_floating_routes.dart';
+ import '../services/app_log.dart';
+ import 'dart:async';
+@@ -2000,7 +2001,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
+         if (texture != null)
+           RotatedBox(
+             quarterTurns: _player!.videoRotationCorrection ~/ 90,
+-            child: isWindowsDesktop
++            child: isWindowsDesktop || isIOSDevice
+                 ? DesktopPlatform.instance.videoSurface(
+                     texture,
+                     key: const ValueKey('player-texture'),
+diff --git a/lib/pages/search_page.dart b/lib/pages/search_page.dart
+index daafb9e..0040162 100644
+--- a/lib/pages/search_page.dart
++++ b/lib/pages/search_page.dart
+@@ -11,6 +11,7 @@ import '../models/media_item.dart';
+ import '../models/media_id.dart';
+ import '../models/search_discovery.dart';
+ import '../services/api_client.dart';
++import '../services/search_filters.dart';
+ import '../services/app_theme_style.dart';
+ import '../services/backend_transport.dart';
+ import '../services/desktop_platform.dart';
+@@ -161,6 +162,10 @@ class SearchRoute<T> extends PageRouteBuilder<T> {
+ 
+ class SearchPage extends StatefulWidget {
+   final String? initialQuery;
++
++  /// 分类入口带进来的分类词（如「都市」）。设置后结果按作品的分类标签过滤，
++  /// 而不是把分类词当关键词只匹配书名。
++  final String? initialTag;
+   final SearchPageLoader? searchLoader;
+   final Future<MediaItem?> Function(String id)? idSearchLoader;
+   final SearchHistoryRepository? historyStore;
+@@ -181,6 +186,7 @@ class SearchPage extends StatefulWidget {
+   const SearchPage({
+     super.key,
+     this.initialQuery,
++    this.initialTag,
+     this.searchLoader,
+     this.idSearchLoader,
+     this.historyStore,
+@@ -228,6 +234,9 @@ class _SearchPageState extends State<SearchPage> {
+   int _requestGeneration = 0;
+   double _minimumScore = 0;
+ 
++  /// 状态 / 字数 / 分类词的二次筛选。
++  SearchFilters _filters = const SearchFilters();
++
+   /// Upstream search results are always `NovelRow` lists; the cover grid is
+   /// an opt-in that fqapp persists.
+   bool _listView = true;
+@@ -312,7 +321,11 @@ class _SearchPageState extends State<SearchPage> {
+     unawaited(_loadLayout());
+     unawaited(_loadMinimumScore());
+     unawaited(_loadHotSearch());
+-    final initial = widget.initialQuery?.trim() ?? '';
++    final tag = widget.initialTag?.trim() ?? '';
++    if (tag.isNotEmpty) _filters = _filters.copyWith(tag: tag);
++    final initial = widget.initialQuery?.trim().isNotEmpty == true
++        ? widget.initialQuery!.trim()
++        : tag;
+     if (initial.isNotEmpty) {
+       _ctrl.text = initial;
+       _draft = initial;
+@@ -415,6 +428,10 @@ class _SearchPageState extends State<SearchPage> {
+       _minimumScore == 0 ||
+       (item.score != null && item.score! >= _minimumScore);
+ 
++  /// 二次筛选：评分 + 分类标签 + 连载状态 + 字数。只作用于已加载的结果。
++  bool _matchesFilters(MediaItem item) =>
++      _matchesScore(item) && _filters.matches(item);
++
+   /// 结果条目的来源限定身份。书旗和番茄各自有自己的 id 命名空间，不能只按
+   /// id 或 kind 匹配。
+   String _resultIdentity(MediaItem item) =>
+@@ -432,7 +449,7 @@ class _SearchPageState extends State<SearchPage> {
+     if (_query.isEmpty || _refining || _showSuggestions) return const [];
+     final feed = _feeds[_tabIndex];
+     if (!feed.initialized || feed.items.isEmpty) return const [];
+-    return feed.items.where(_matchesScore).toList(growable: false);
++    return feed.items.where(_matchesFilters).toList(growable: false);
+   }
+ 
+   RenderBox? _resultBox(MediaItem item) {
+@@ -957,7 +974,7 @@ class _SearchPageState extends State<SearchPage> {
+                 tab.title == category.sourceTitle),
+         orElse: () => SearchTab(title: category.title, items: []),
+       );
+-      final before = feed.items.where(_matchesScore).length;
++      final before = feed.items.where(_matchesFilters).length;
+       setState(() {
+         for (final item in page.items) {
+           if (item.id.isEmpty ||
+@@ -974,7 +991,7 @@ class _SearchPageState extends State<SearchPage> {
+       });
+       // A filtered-empty or duplicate page can still advance. Leave a manual
+       // continuation instead of chaining requests without new visible results.
+-      if (feed.items.where(_matchesScore).length > before) {
++      if (feed.items.where(_matchesFilters).length > before) {
+         _scheduleLoadMoreIfNeeded(index, generation);
+       }
+     } catch (e) {
+@@ -1235,7 +1252,7 @@ class _SearchPageState extends State<SearchPage> {
+         ),
+       );
+     }
+-    final items = feed.items.where(_matchesScore).toList(growable: false);
++    final items = feed.items.where(_matchesFilters).toList(growable: false);
+     if (items.isEmpty) {
+       final filtered = _idQuery == null && !_shuqiSource && _minimumScore > 0;
+       final notice = ContentNotice(
+@@ -1369,6 +1386,187 @@ class _SearchPageState extends State<SearchPage> {
+     },
+   );
+ 
++  static const _statusLabels = <int, String>{
++    -1: '状态不限',
++    0: '已完结',
++    1: '连载中',
++    4: '已停更',
++  };
++
++  static const _wordLabels = <int, String>{
++    0: '字数不限',
++    1: '30 万字以下',
++    2: '30–100 万字',
++    3: '100–300 万字',
++    4: '300 万字以上',
++  };
++
++  /// 分类 + 状态 + 字数 的二次筛选条。分类词来自分类页入口，可一键清除。
++  Widget _filterBar(BuildContext context) {
++    return Padding(
++      padding: const EdgeInsets.only(top: 2, bottom: 4),
++      child: Wrap(
++          spacing: 6,
++          runSpacing: 6,
++          crossAxisAlignment: WrapCrossAlignment.center,
++          children: [
++            if (_filters.tag != null && _filters.tag!.isNotEmpty)
++              _filterPill(
++                context,
++                '分类：${_filters.tag}',
++                active: true,
++                icon: CupertinoIcons.xmark,
++                onTap: () => setState(
++                  () => _filters = _filters.copyWith(clearTag: true),
++                ),
++              ),
++            _filterMenu(
++              context,
++              _statusLabels[_filters.status] ?? _statusLabels[-1]!,
++              active: _filters.status >= 0,
++              values: _statusLabels,
++              current: _filters.status,
++              onSelected: (value) =>
++                  setState(() => _filters = _filters.copyWith(status: value)),
++            ),
++            _filterMenu(
++              context,
++              _wordLabels[_filters.wordCount] ?? _wordLabels[0]!,
++              active: _filters.wordCount > 0,
++              values: _wordLabels,
++              current: _filters.wordCount,
++              onSelected: (value) => setState(
++                () => _filters = _filters.copyWith(wordCount: value),
++              ),
++            ),
++            if (_filters.status >= 0 || _filters.wordCount > 0)
++              _filterPill(
++                context,
++                '清除筛选',
++                active: false,
++                icon: CupertinoIcons.arrow_counterclockwise,
++                onTap: () => setState(
++                  () => _filters = SearchFilters(tag: _filters.tag),
++                ),
++              ),
++          ],
++        ),
++    );
++  }
++
++  Widget _filterPill(
++    BuildContext context,
++    String label, {
++    required bool active,
++    IconData? icon,
++    required VoidCallback onTap,
++  }) {
++    final scheme = Theme.of(context).colorScheme;
++    return InkWell(
++      borderRadius: BorderRadius.circular(20),
++      onTap: onTap,
++      child: Container(
++        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
++        decoration: BoxDecoration(
++          color: active
++              ? scheme.primary.withValues(alpha: 0.16)
++              : scheme.onSurface.withValues(alpha: 0.06),
++          borderRadius: BorderRadius.circular(20),
++        ),
++        child: Row(
++          mainAxisSize: MainAxisSize.min,
++          children: [
++            Text(
++              label,
++              style: TextStyle(
++                fontSize: 12.5,
++                fontWeight: active ? FontWeight.w600 : FontWeight.w500,
++                color: active ? scheme.primary : scheme.onSurfaceVariant,
++              ),
++            ),
++            if (icon != null) ...[
++              const SizedBox(width: 4),
++              Icon(
++                icon,
++                size: 12,
++                color: active ? scheme.primary : scheme.onSurfaceVariant,
++              ),
++            ],
++          ],
++        ),
++      ),
++    );
++  }
++
++  /// 可点开的筛选胶囊：点一下弹底部选择面板（比 PopupMenu 更贴近 iOS 手感，
++  /// 也避免在结果头部里塞一层 overlay 菜单）。
++  Widget _filterMenu(
++    BuildContext context,
++    String label, {
++    required bool active,
++    required Map<int, String> values,
++    required int current,
++    required ValueChanged<int> onSelected,
++  }) {
++    return _filterPill(
++      context,
++      label,
++      active: active,
++      icon: CupertinoIcons.chevron_down,
++      onTap: () async {
++        final picked = await showModalBottomSheet<int>(
++          context: context,
++          showDragHandle: true,
++          builder: (sheetContext) => SafeArea(
++            child: SingleChildScrollView(
++              child: Column(
++                mainAxisSize: MainAxisSize.min,
++                children: [
++                  for (final entry in values.entries)
++                    InkWell(
++                      onTap: () => Navigator.of(sheetContext).pop(entry.key),
++                      child: SizedBox(
++                        height: 48,
++                        child: Row(
++                          children: [
++                            const SizedBox(width: 22),
++                            Expanded(
++                              child: Text(
++                                entry.value,
++                                style: TextStyle(
++                                  fontSize: 15,
++                                  fontWeight: entry.key == current
++                                      ? FontWeight.w600
++                                      : FontWeight.w400,
++                                  color: entry.key == current
++                                      ? Theme.of(sheetContext).colorScheme.primary
++                                      : Theme.of(sheetContext).colorScheme.onSurface,
++                                ),
++                              ),
++                            ),
++                            if (entry.key == current)
++                              Padding(
++                                padding: const EdgeInsets.only(right: 18),
++                                child: Icon(
++                                  CupertinoIcons.checkmark_alt,
++                                  size: 18,
++                                  color: Theme.of(sheetContext).colorScheme.primary,
++                                ),
++                              ),
++                          ],
++                        ),
++                      ),
++                    ),
++                ],
++              ),
++            ),
++          ),
++        );
++        if (picked != null && picked != current) onSelected(picked);
++      },
++    );
++  }
++
+   Widget _resultsHeading(BuildContext context, int count) {
+     final scheme = Theme.of(context).colorScheme;
+     final secondary = TextStyle(
+@@ -1428,6 +1626,7 @@ class _SearchPageState extends State<SearchPage> {
+               ),
+             ],
+           ),
++          if (!_shuqiSource) _filterBar(context),
+           if (_idQuery != null)
+             Row(
+               children: [
+@@ -1597,6 +1796,7 @@ class _SearchPageState extends State<SearchPage> {
+     listView: _listView,
+     onToggleLayout: _toggleLayout,
+     showRatingHint: _idQuery == null && !_shuqiSource && _minimumScore > 0,
++    filters: _shuqiSource ? null : _filterBar(context),
+   );
+ 
+   Widget _classicIdHint(BuildContext context) => ClassicSearchIdLookupHint(
+@@ -1647,7 +1847,7 @@ class _SearchPageState extends State<SearchPage> {
+         ),
+       );
+     }
+-    final items = feed.items.where(_matchesScore).toList(growable: false);
++    final items = feed.items.where(_matchesFilters).toList(growable: false);
+     if (items.isEmpty) {
+       return _classicResultsShell(
+         context,
+diff --git a/lib/services/desktop_media.dart b/lib/services/desktop_media.dart
+index 7d23d62..df4520c 100644
+--- a/lib/services/desktop_media.dart
++++ b/lib/services/desktop_media.dart
+@@ -22,6 +22,18 @@ String desktopCoreLibraryPath() {
+   return File('rust/target/release/fqapi_core.dll').absolute.path;
+ }
+ 
++/// 打开 Rust 核心所在的动态库。
++///
++/// iOS 的 Rust 核心是静态库（`-force_load` 链进主二进制），没有可 `open` 的
++/// 文件：`desktopCoreLibraryPath()` 返回的 `.dll` 路径在 iOS 上必然失败，
++/// 短剧/听书这类 `encrypt_info` 媒体就会在 `DesktopMedia.open` 直接抛错。
++/// 这条路径必须和 `rust_bootstrap_io.dart` 的 FRB 初始化一致，改走进程自身
++/// 导出符号（`-Wl,-export_dynamic` + `DEAD_CODE_STRIPPING=NO` 保证存在）。
++DynamicLibrary _coreLibrary() {
++  if (Platform.isIOS) return DynamicLibrary.process();
++  return DynamicLibrary.open(desktopCoreLibraryPath());
++}
++
+ /// A failed media session open. [message] is a fixed user-facing string from
+ /// the native core; it never carries the URL or key.
+ class DesktopMediaException implements Exception {
+@@ -69,17 +81,15 @@ Map<String, Object> desktopOpenFailure(int playerId, Object error) {
+ }
+ 
+ class DesktopMedia {
+-  DesktopMedia._(this.id, this.url, this.libraryPath);
++  DesktopMedia._(this.id, this.url);
+   final String id;
+   final String url;
+-  final String libraryPath;
+   bool _closed = false;
+ 
+   static Future<DesktopMedia> open(String url, String key) async {
+-    final path = desktopCoreLibraryPath();
+     // Metadata probing performs synchronous native I/O, away from the UI isolate.
+     final result = await Isolate.run(() {
+-      final lib = DynamicLibrary.open(path);
++      final lib = _coreLibrary();
+       final open = lib.lookupFunction<_OpenNative, _Open>(
+         'fq_desktop_media_open',
+       );
+@@ -106,17 +116,13 @@ class DesktopMedia {
+         httpStatus: result['status'] is int ? result['status'] as int : null,
+       );
+     }
+-    return DesktopMedia._(
+-      result['id'] as String,
+-      result['url'] as String,
+-      path,
+-    );
++    return DesktopMedia._(result['id'] as String, result['url'] as String);
+   }
+ 
+   void close() {
+     if (_closed) return;
+     _closed = true;
+-    final lib = DynamicLibrary.open(libraryPath);
++    final lib = _coreLibrary();
+     final close = lib.lookupFunction<_FreeNative, _Free>(
+       'fq_desktop_media_close',
+     );
+diff --git a/lib/services/desktop_platform.dart b/lib/services/desktop_platform.dart
+index 17ee220..700a41b 100644
+--- a/lib/services/desktop_platform.dart
++++ b/lib/services/desktop_platform.dart
+@@ -4,6 +4,7 @@ import 'dart:convert';
+ import 'dart:ffi' hide Size;
+ import 'dart:io';
+ import 'dart:math';
++import 'dart:typed_data';
+ 
+ import 'package:archive/archive.dart';
+ import 'package:ffi/ffi.dart';
+@@ -546,6 +547,14 @@ class DesktopPlatform with WindowListener {
+     Uint8List bytes,
+     List<String> extensions,
+   ) async {
++    // iOS 没有「另存为」面板：写进临时目录后弹系统分享面板，由用户决定存到
++    // 「文件」、发出去还是取消（见 ios/Runner/AppDelegate.swift 的 IosFilesBridge）。
++    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
++      return const MethodChannel('fqapp/ios_files').invokeMethod<String>(
++        'saveFile',
++        {'name': _safeName(name), 'bytes': bytes},
++      );
++    }
+     final location = await getSaveLocation(
+       suggestedName: _safeName(name),
+       acceptedTypeGroups: [XTypeGroup(label: '文件', extensions: extensions)],
+@@ -728,9 +737,21 @@ class DesktopPlatform with WindowListener {
+   }
+ 
+   Future<Map<String, dynamic>?> pickBook() async {
++    // iOS 的 UIDocumentPicker 只认 UTI，file_selector 的 iOS 实现在
++    // uniformTypeIdentifiers 为空时直接抛 ArgumentError，不会退回去看
++    // extensions，所以两条路要分开给。
+     final file = await openFile(
+       acceptedTypeGroups: [
+-        const XTypeGroup(label: '本地书籍', extensions: ['txt', 'epub']),
++        if (Platform.isIOS)
++          const XTypeGroup(
++            label: '本地书籍',
++            uniformTypeIdentifiers: [
++              'public.plain-text',
++              'org.idpf.epub-container',
++            ],
++          )
++        else
++          const XTypeGroup(label: '本地书籍', extensions: ['txt', 'epub']),
+       ],
+     );
+     if (file == null) return null;
+@@ -791,34 +812,133 @@ String decodeDesktopText(Uint8List bytes) {
+   try {
+     return utf8.decode(bytes).replaceFirst(RegExp('^\uFEFF'), '');
+   } on FormatException {
+-    final convert = DynamicLibrary.open('kernel32.dll')
+-        .lookupFunction<
+-          Int32 Function(
+-            Uint32,
+-            Uint32,
+-            Pointer<Uint8>,
+-            Int32,
+-            Pointer<Uint16>,
+-            Int32,
+-          ),
+-          int Function(int, int, Pointer<Uint8>, int, Pointer<Uint16>, int)
+-        >('MultiByteToWideChar');
+-    final input = calloc<Uint8>(bytes.length);
+-    input.asTypedList(bytes.length).setAll(0, bytes);
+-    Pointer<Uint16> output = nullptr;
+-    try {
+-      final length = convert(54936, 0, input, bytes.length, nullptr, 0);
+-      if (length == 0) throw const FormatException('无法识别 TXT 编码');
+-      output = calloc<Uint16>(length);
+-      if (convert(54936, 0, input, bytes.length, output, length) == 0) {
+-        throw const FormatException('无法读取 TXT');
++    // 中文 TXT 大量是 GBK/GB18030。Windows 上系统 API 可转；其余平台必须走
++    // iconv——早先这里无条件 DynamicLibrary.open('kernel32.dll')，在
++    // iOS/macOS 上必然抛错，导入就会只剩下「请重试」这一句。
++    return Platform.isWindows
++        ? _decodeGb18030Windows(bytes)
++        : _decodeGb18030Iconv(bytes);
++  }
++}
++
++String _decodeGb18030Windows(Uint8List bytes) {
++  final convert = DynamicLibrary.open('kernel32.dll')
++      .lookupFunction<
++        Int32 Function(
++          Uint32,
++          Uint32,
++          Pointer<Uint8>,
++          Int32,
++          Pointer<Uint16>,
++          Int32,
++        ),
++        int Function(int, int, Pointer<Uint8>, int, Pointer<Uint16>, int)
++      >('MultiByteToWideChar');
++  final input = calloc<Uint8>(bytes.isEmpty ? 1 : bytes.length);
++  input.asTypedList(bytes.length).setAll(0, bytes);
++  Pointer<Uint16> output = nullptr;
++  try {
++    final length = convert(54936, 0, input, bytes.length, nullptr, 0);
++    if (length == 0) throw const FormatException('无法识别 TXT 编码');
++    output = calloc<Uint16>(length);
++    if (convert(54936, 0, input, bytes.length, output, length) == 0) {
++      throw const FormatException('无法读取 TXT');
++    }
++    return String.fromCharCodes(output.asTypedList(length));
++  } finally {
++    calloc.free(input);
++    if (output != nullptr) calloc.free(output);
++  }
++}
++
++typedef _IconvOpenNative =
++    Pointer<Void> Function(Pointer<Utf8>, Pointer<Utf8>);
++typedef _IconvNative =
++    IntPtr Function(
++      Pointer<Void>,
++      Pointer<Pointer<Uint8>>,
++      Pointer<IntPtr>,
++      Pointer<Pointer<Uint8>>,
++      Pointer<IntPtr>,
++    );
++typedef _IconvDart =
++    int Function(
++      Pointer<Void>,
++      Pointer<Pointer<Uint8>>,
++      Pointer<IntPtr>,
++      Pointer<Pointer<Uint8>>,
++      Pointer<IntPtr>,
++    );
++typedef _IconvOpenDart = Pointer<Void> Function(Pointer<Utf8>, Pointer<Utf8>);
++typedef _IconvCloseNative = Int32 Function(Pointer<Void>);
++typedef _IconvCloseDart = int Function(Pointer<Void>);
++
++/// GB18030 → UTF-8，走系统 libiconv。
++///
++/// iOS 把 libiconv 放在 dyld 共享缓存里，符号经 `-liconv` 链接后可在这种
++/// 进程内 dlsym 到（macOS 同样）。
++String _decodeGb18030Iconv(Uint8List bytes) {
++  final process = DynamicLibrary.process();
++  final open = process.lookupFunction<_IconvOpenNative, _IconvOpenDart>(
++    'iconv_open',
++  );
++  final convert = process.lookupFunction<_IconvNative, _IconvDart>('iconv');
++  final close = process.lookupFunction<_IconvCloseNative, _IconvCloseDart>(
++    'iconv_close',
++  );
++  final target = 'UTF-8'.toNativeUtf8();
++  Pointer<Void> descriptor = nullptr;
++  try {
++    // 各平台库里的编码名不完全一致：GB18030 覆盖 GBK/CP936，缺了再退一级。
++    for (final name in const ['GB18030', 'GBK', 'CP936']) {
++      final source = name.toNativeUtf8();
++      try {
++        descriptor = open(target, source);
++      } finally {
++        calloc.free(source);
+       }
+-      return String.fromCharCodes(output.asTypedList(length));
+-    } finally {
+-      calloc.free(input);
+-      if (output != nullptr) calloc.free(output);
++      if (descriptor.address > 0) break;
+     }
++  } finally {
++    calloc.free(target);
+   }
++  if (descriptor.address <= 0) {
++    throw const FormatException('无法识别 TXT 编码');
++  }
++  final input = calloc<Uint8>(bytes.isEmpty ? 1 : bytes.length);
++  input.asTypedList(bytes.length).setAll(0, bytes);
++  final inPtr = calloc<Pointer<Uint8>>()..value = input;
++  final inLeft = calloc<IntPtr>()..value = bytes.length;
++  const chunk = 1 << 16;
++  final outBuf = calloc<Uint8>(chunk);
++  final outPtr = calloc<Pointer<Uint8>>();
++  final outLeft = calloc<IntPtr>();
++  // 输出缓冲复用，必须拷贝：copy:false 会让各轮数据互相覆盖。
++  final builder = BytesBuilder();
++  try {
++    while (true) {
++      outPtr.value = outBuf;
++      outLeft.value = chunk;
++      final result = convert(descriptor, inPtr, inLeft, outPtr, outLeft);
++      final produced = chunk - outLeft.value;
++      if (produced > 0) builder.add(outBuf.asTypedList(produced));
++      if (result == -1) {
++        // 只有 E2BIG（输出缓冲写满）值得重来；EILSEQ/EINVAL 说明不是 GB18030。
++        if (produced > 0 && inLeft.value > 0) continue;
++        throw const FormatException('无法识别 TXT 编码');
++      }
++      if (inLeft.value == 0) break;
++    }
++  } finally {
++    close(descriptor);
++    calloc.free(input);
++    calloc.free(inPtr);
++    calloc.free(inLeft);
++    calloc.free(outBuf);
++    calloc.free(outPtr);
++    calloc.free(outLeft);
++  }
++  return utf8.decode(builder.takeBytes());
+ }
+ 
+ class _DesktopPlayer {
+@@ -843,9 +963,11 @@ class _DesktopPlayer {
+       player.stream.completed.listen((v) => event('completed', v)),
+       player.stream.width.listen((_) => _size()),
+       player.stream.height.listen((_) => _size()),
+-      player.stream.error.listen(
+-        (_) => event('error', {'message': '媒体播放失败，请重试或切换清晰度'}),
+-      ),
++      player.stream.error.listen((message) {
++        // 原始报错只写日志：它可能带签名 URL，绝不能进界面文案。
++        AppLog.d('desktop-player', 'id=$id mpv error=$message');
++        event('error', {'message': '媒体播放失败，请重试或切换清晰度'});
++      }),
+     ]);
+     unawaited(
+       video.waitUntilFirstFrameRendered.then((_) => event('firstFrame', true)),
+diff --git a/lib/services/ios_platform.dart b/lib/services/ios_platform.dart
+new file mode 100644
+index 0000000..64526ae
+--- /dev/null
++++ b/lib/services/ios_platform.dart
+@@ -0,0 +1,76 @@
++import 'dart:async';
++
++import 'package:flutter/foundation.dart';
++import 'package:flutter/services.dart';
++import 'package:material_ui/material_ui.dart';
++import 'package:wakelock_plus/wakelock_plus.dart';
++
++import 'app_log.dart';
++import 'desktop_platform.dart';
++import 'platform_channel.dart';
++
++/// 是否跑在 iOS / iPadOS 真机与模拟器上。
++bool get isIOSDevice =>
++    !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
++
++/// iOS 的进程内平台适配层。
++///
++/// Android 那套 `fqapp/native_player` 通道在 iOS 上没有原生实现；这里把同一
++/// 份通道契约接到 Dart 侧的 media_kit 播放器（和 Windows/Linux 共用
++/// [DesktopPlatform]），于是播放页、短剧页、听书页的代码一行都不用改，
++/// 只是能力收敛到桌面版那一档：能播、能暂停/拖动/倍速/音量、没有悬浮窗。
++///
++/// 没有接入的回放能力（画中画、后台音频的锁屏控制、直播）走的是和桌面一样的
++/// 「不支持」分支，不会把失败说成成功。
++class IosPlatform {
++  IosPlatform._();
++
++  static Future<void> install() async {
++    // 播放器事件（created/position/playing/…）由 DesktopPlatform 合成，
++    // 其余通道仍旧交回真正的 MethodChannel，缺实现时照常抛
++    // MissingPluginException，与没装适配层之前一致。
++    PlatformChannels.events = (name) {
++      if (name == 'fqapp/native_player/events' ||
++          name == 'fqapp/reader/events') {
++        return DesktopPlatform.instance.events(name);
++      }
++      return EventChannel(name).receiveBroadcastStream();
++    };
++    PlatformChannels.invoke = (channel, method, arguments) async {
++      // 书架备份 / 本地书籍 / 下载导出在桌面上由 file_selector + path_provider
++      // 实现，iOS 上这两套插件都有（file_selector_ios 提供系统文件选择器），
++      // 直接复用桌面实现即可；导出没有「另存为」，由 IosFilesBridge 换成分享面板。
++      if (channel == 'fqapp/library_backup' || channel == 'fqapp/local_books') {
++        return DesktopPlatform.instance.invoke(channel, method, arguments);
++      }
++      if (channel == 'fqapp/native_player') {
++        // 亮屏锁：Windows 走 kernel32，Linux 走会话桥，iOS 用 wakelock_plus。
++        if (method == 'setKeepScreenOn') {
++          final args = arguments is Map ? arguments : const {};
++          try {
++            if (args['on'] == true) {
++              await WakelockPlus.enable();
++            } else {
++              await WakelockPlus.disable();
++            }
++          } catch (error, stack) {
++            AppLog.w('ios-player', '亮屏锁切换失败', error: error, stack: stack);
++          }
++          return null;
++        }
++        // SMTC / 悬浮窗是 Windows、Android 专有，iOS 上没有等价物。
++        if (method == 'startListenForeground' ||
++            method == 'stopListenForeground') {
++          return null;
++        }
++        return DesktopPlatform.instance.invoke(channel, method, arguments);
++      }
++      return MethodChannel(channel).invokeMethod<dynamic>(method, arguments);
++    };
++  }
++
++  /// media_kit 的 `Video` 需要拿到它自己的 `VideoController`，不能像 Android
++  /// 那样直接 `Texture(textureId:)`；表面的搬运交给 [DesktopPlatform]。
++  static Widget videoSurface(int id, {Key? key}) =>
++      DesktopPlatform.instance.videoSurface(id, key: key);
++}
+diff --git a/lib/services/platform_capabilities.dart b/lib/services/platform_capabilities.dart
+index daca52b..8cf02c4 100644
+--- a/lib/services/platform_capabilities.dart
++++ b/lib/services/platform_capabilities.dart
+@@ -5,8 +5,11 @@ import 'desktop_platform.dart';
+ /// 视频播放是否可用。
+ ///
+ /// 视频依赖原生播放器：Android 走 ExoPlayer 平台通道（`fqapp/native_player`），
+-/// 桌面走 media_kit。iOS 首版没有播放器实现，直接进入播放页会抛
+-/// `MissingPluginException`，所以入口整体降级为「暂不支持」。
++/// 桌面和 iOS 走进程内的 media_kit —— iOS 上没有原生播放器实现，通道由
++/// `IosPlatform` 接到 Dart 侧，能力等同 Windows 桌面版（没有悬浮窗、画中画
++/// 与后台锁屏控制）。
+ bool get supportsVideoPlayback =>
+     !kIsWeb &&
+-    (defaultTargetPlatform == TargetPlatform.android || isWindowsDesktop);
++    (defaultTargetPlatform == TargetPlatform.android ||
++        defaultTargetPlatform == TargetPlatform.iOS ||
++        isWindowsDesktop);
+diff --git a/lib/services/search_filters.dart b/lib/services/search_filters.dart
+new file mode 100644
+index 0000000..4c194b0
+--- /dev/null
++++ b/lib/services/search_filters.dart
+@@ -0,0 +1,53 @@
++import '../models/media_item.dart';
++
++/// 搜索结果与分类结果的二次筛选（状态 / 字数 / 分类词）。
++///
++/// 这些筛选只作用于**已加载**的结果：上游没有把这些条件下推到接口，
++/// 所以继续加载更多时会带进新条目一起筛。抽成纯函数是为了能单测，
++/// 也避免页面里散落一份同样的判断。
++class SearchFilters {
++  const SearchFilters({
++    this.status = -1,
++    this.wordCount = 0,
++    this.tag,
++  });
++
++  /// -1 全部、0 完结、1 连载中、4 停更，与上游 `creation_status` 一致。
++  final int status;
++
++  /// 0 全部、1 <30 万、2 30–100 万、3 100–300 万、4 >300 万。
++  final int wordCount;
++
++  /// 分类入口带进来的分类词，命中作品的分类标签优先，标题作为兜底。
++  final String? tag;
++
++  bool get isActive =>
++      status >= 0 || wordCount > 0 || (tag != null && tag!.isNotEmpty);
++
++  SearchFilters copyWith({int? status, int? wordCount, String? tag, bool clearTag = false}) =>
++      SearchFilters(
++        status: status ?? this.status,
++        wordCount: wordCount ?? this.wordCount,
++        tag: clearTag ? null : (tag ?? this.tag),
++      );
++
++  bool matches(MediaItem item) {
++    if (status >= 0 && item.creationStatus != status) return false;
++    if (wordCount > 0 && !_matchesWordCount(item.wordNumber)) return false;
++    final key = tag;
++    if (key != null && key.isNotEmpty) {
++      final hit = item.categories.any((category) => category.contains(key)) ||
++          item.title.contains(key);
++      if (!hit) return false;
++    }
++    return true;
++  }
++
++  bool _matchesWordCount(int words) => switch (wordCount) {
++    1 => words > 0 && words < 300000,
++    2 => words >= 300000 && words < 1000000,
++    3 => words >= 1000000 && words < 3000000,
++    4 => words >= 3000000,
++    _ => true,
++  };
++}
+diff --git a/lib/widgets/search/classic_search_content_toolbar.dart b/lib/widgets/search/classic_search_content_toolbar.dart
+index 57f8d04..ad82c26 100644
+--- a/lib/widgets/search/classic_search_content_toolbar.dart
++++ b/lib/widgets/search/classic_search_content_toolbar.dart
+@@ -21,6 +21,9 @@ class ClassicSearchContentToolbar extends StatelessWidget {
+   /// 「筛选已加载结果…」提示只在评分阈值生效时跟在工具条下面。
+   final bool showRatingHint;
+ 
++  /// 二次筛选条（完结状态 / 字数档位），由搜索页提供，跟随工具条一起滚动。
++  final Widget? filters;
++
+   const ClassicSearchContentToolbar({
+     super.key,
+     required this.shuqi,
+@@ -30,6 +33,7 @@ class ClassicSearchContentToolbar extends StatelessWidget {
+     required this.listView,
+     required this.onToggleLayout,
+     this.showRatingHint = false,
++    this.filters,
+   });
+ 
+   @override
+@@ -79,6 +83,15 @@ class ClassicSearchContentToolbar extends StatelessWidget {
+             ),
+           ),
+         ),
++        if (filters != null)
++          Padding(
++            padding: const EdgeInsets.only(
++              left: homeGutter,
++              right: homeGutter - 4,
++              bottom: 4,
++            ),
++            child: filters,
++          ),
+         if (showRatingHint)
+           Padding(
+             padding: const EdgeInsets.only(left: homeGutter, bottom: 8),
+diff --git a/pubspec.lock b/pubspec.lock
+index 06f713b..4cc602c 100644
+--- a/pubspec.lock
++++ b/pubspec.lock
+@@ -603,6 +603,14 @@ packages:
+       url: "https://pub.dev"
+     source: hosted
+     version: "1.2.6"
++  media_kit_libs_ios_video:
++    dependency: "direct main"
++    description:
++      name: media_kit_libs_ios_video
++      sha256: b5382994eb37a4564c368386c154ad70ba0cc78dacdd3fb0cd9f30db6d837991
++      url: "https://pub.dev"
++    source: hosted
++    version: "1.1.4"
+   media_kit_libs_linux:
+     dependency: "direct main"
+     description:
+@@ -1185,7 +1193,7 @@ packages:
+     source: hosted
+     version: "15.4.0"
+   wakelock_plus:
+-    dependency: transitive
++    dependency: "direct main"
+     description:
+       name: wakelock_plus
+       sha256: ddf3db70eaa10c37558ff817519b85d527dbd21034fd5d8e1c2e85f31588f1c1
+diff --git a/pubspec.yaml b/pubspec.yaml
+index 9202796..fc44b41 100644
+--- a/pubspec.yaml
++++ b/pubspec.yaml
+@@ -63,11 +63,16 @@ dependencies:
+   # Android/iOS/macOS/Linux 的播放库会一起进包（APK 多出 ~11 MB）。
+   media_kit_libs_windows_video: 1.0.11
+   media_kit_libs_linux: 1.2.1
++  # iOS 的 libmpv（AVFoundation 输出 + 视频纹理）。同样只加 iOS 这一个，
++  # umbrella 包会把其余平台一起拖进来。
++  media_kit_libs_ios_video: 1.1.4
+   file_selector: ^1.1.0
+   flutter_tts: ^4.2.5
+   webview_windows:
+     path: third_party/webview_windows
+   window_manager: ^0.5.1
++  # 亮屏锁：iOS 上也用得到（Windows 走 kernel32，Linux 走会话桥）。
++  wakelock_plus: ^1.5.2
+   screen_retriever: 0.2.2
+   smtc_windows: ^1.1.0
+   ffi: ^2.1.4
+diff --git a/rust/Cargo.toml b/rust/Cargo.toml
+index 9d2d98d..1f2983a 100644
+--- a/rust/Cargo.toml
++++ b/rust/Cargo.toml
+@@ -43,7 +43,7 @@ log = "0.4"
+ [build-dependencies]
+ cc = "1"
+ 
+-[target.'cfg(any(windows, target_os = "linux"))'.dependencies]
++[target.'cfg(any(windows, target_os = "linux", target_os = "ios"))'.dependencies]
+ reqwest = { version = "0.13", default-features = false, features = ["blocking"] }
+ 
+ # The shipping app runs the core in-process on Android; `adb logcat` is the
+diff --git a/rust/build.rs b/rust/build.rs
+index 35d2fc9..750a06b 100644
+--- a/rust/build.rs
++++ b/rust/build.rs
+@@ -1,6 +1,8 @@
+ fn main() {
+     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
+-    if target_os != "windows" && target_os != "linux" {
++    // 加密媒体的 C 实现（CryptoDataSource 的同一份源码）在 iOS 上同样需要：
++    // desktop_media 的 sp_stream_* 入口是它导出的，缺了会链接失败。
++    if target_os != "windows" && target_os != "linux" && target_os != "ios" {
+         return;
+     }
+     let sources = [
+diff --git a/rust/examples/video_probe.rs b/rust/examples/video_probe.rs
+new file mode 100644
+index 0000000..597f4a9
+--- /dev/null
++++ b/rust/examples/video_probe.rs
+@@ -0,0 +1,92 @@
++//! Host probe: start the real core against the real upstream and dump the
++//! short-drama stream resolution exactly as the app sees it.
++//!
++//! Usage: cargo run --release --example video_probe -- <runtime_dir> [video_id]
++
++struct PrintLogger;
++impl log::Log for PrintLogger {
++    fn enabled(&self, _: &log::Metadata) -> bool {
++        true
++    }
++    fn log(&self, record: &log::Record) {
++        println!("LOG {} {}: {}", record.level(), record.target(), record.args());
++    }
++    fn flush(&self) {}
++}
++static LOGGER: PrintLogger = PrintLogger;
++
++#[tokio::main]
++async fn main() -> Result<(), Box<dyn std::error::Error>> {
++    let mut args = std::env::args().skip(1);
++    let runtime = args.next().expect("runtime dir");
++    let video_id = args.next();
++
++    log::set_logger(&LOGGER)?;
++    log::set_max_level(log::LevelFilter::Debug);
++
++    let init = fqapi_core::api::init(
++        format!("{runtime}/config/config.json"),
++        format!("{runtime}/config/device_pool.json"),
++        format!("{runtime}/config/filter.json"),
++        runtime.clone(),
++        0,
++        false,
++        String::new(),
++    )
++    .await?;
++    println!("init: {init}");
++
++    let base = fqapi_core::api::base_url().await;
++    let cap = fqapi_core::api::session_capability().await;
++    println!("base: {base} cap: {}...", &cap[..8.min(cap.len())]);
++
++    let http = reqwest::Client::new();
++    let url = |path: &str| format!("{base}/_session/{cap}{path}");
++
++    if let Some(spec) = video_id.clone() {
++        if let Some(path) = spec.strip_prefix("path:") {
++            let body = fetch_text(&http, &url(path)).await;
++            println!("[{path}] {}", &body[..body.len().min(400000)]);
++            return Ok(());
++        }
++    }
++
++    if let Some(id) = video_id {
++        fetch(&http, &url(&format!("/api/v1/videos/{id}?mode=stream")), "stream").await;
++        fetch(&http, &url(&format!("/api/v1/videos/{id}")), "model").await;
++        return Ok(());
++    }
++
++    // No id given: find one from the 短剧 search.
++    let search = url("/api/v1/search?query=%E9%9C%B8%E6%80%BB&offset=0&count=10");
++    let body = fetch_text(&http, &search).await;
++    println!("search: {}", &body[..body.len().min(1200)]);
++    Ok(())
++}
++
++async fn fetch(http: &reqwest::Client, url: &str, label: &str) {
++    let started = std::time::Instant::now();
++    match http.get(url).send().await {
++        Ok(res) => {
++            let status = res.status();
++            let body = res.text().await.unwrap_or_default();
++            println!(
++                "[{label}] {status} {}ms {}",
++                started.elapsed().as_millis(),
++                &body[..body.len().min(800)]
++            );
++        }
++        Err(e) => println!("[{label}] transport error after {:?}: {e}", started.elapsed()),
++    }
++}
++
++async fn fetch_text(http: &reqwest::Client, url: &str) -> String {
++    match http.get(url).send().await {
++        Ok(res) => {
++            let status = res.status();
++            let body = res.text().await.unwrap_or_default();
++            format!("{status} {body}")
++        }
++        Err(e) => format!("transport error: {e}"),
++    }
++}
+diff --git a/rust/src/endpoints/video.rs b/rust/src/endpoints/video.rs
+index 7cc8e3a..ae7e3fa 100644
+--- a/rust/src/endpoints/video.rs
++++ b/rust/src/endpoints/video.rs
+@@ -666,8 +666,16 @@ fn multi_video_model_body(video_id: &str) -> ApiResult<Vec<u8>> {
+             "use_server_dns": false,
+             "video_platform": 1024,
+         },
++        // The official client puts the id under every series content type and
++        // lets the server pick the one that matches. The server keys the lookup
++        // off this map, so an id sent under the wrong type alone comes back as
++        // an empty body. `lib/models/related_series.dart` lists the types the
++        // app itself recognises: 1/1002 are 视频, 1004/1007 are 漫剧.
+         "mixed_video_id_map": {
++            "1": [video_id],
++            "1002": [video_id],
+             "1004": [video_id],
++            "1007": [video_id],
+         },
+     }))
+     .map_err(|e| ApiError::Internal(format!("marshal multi_video_model body: {e}")))
+@@ -1614,7 +1622,44 @@ async fn resolve_video_source_fallback_status(
+                     }
+                     return FallbackResolution::Found(url, key);
+                 }
+-                VideoSourceResolution::CodecRejected => codec_rejected = true,
++                VideoSourceResolution::CodecRejected => {
++                    // bytevc2-only list: ask the same endpoint for H.265 before
++                    // declaring the episode unplayable.
++                    match h265_fallback_url(&fallback_url) {
++                        Some(alt) => {
++                            match fetch_fallback_video_info(
++                                ctx,
++                                video_id,
++                                source.name(),
++                                &alt,
++                                deadline,
++                            )
++                            .await
++                            {
++                                Ok(h265_data) => {
++                                    match extract_fallback_video_source(&h265_data) {
++                                        VideoSourceResolution::Found(url, key) => {
++                                            if let Some(cache) = fallback_bodies {
++                                                let mut cache = cache
++                                                    .lock()
++                                                    .unwrap_or_else(|error| error.into_inner());
++                                                if cache.len() < STREAM_BODY_LIMIT {
++                                                    cache
++                                                        .entry(alt)
++                                                        .or_insert_with(|| Arc::new(h265_data));
++                                                }
++                                            }
++                                            return FallbackResolution::Found(url, key);
++                                        }
++                                        _ => codec_rejected = true,
++                                    }
++                                }
++                                Err(_) => codec_rejected = true,
++                            }
++                        }
++                        None => codec_rejected = true,
++                    }
++                }
+                 VideoSourceResolution::NotFound => retryable = true,
+             },
+             Err(failure) => {
+@@ -1902,7 +1947,28 @@ async fn fallback_variant_rows(
+             }
+         };
+     let fallback_data = Arc::new(fallback_data);
+-    let rows = fallback_rows_from_body(fallback_data.as_ref());
++    let mut rows = fallback_rows_from_body(fallback_data.as_ref());
++    if playable_variant_tier_count(&rows) == 0 {
++        // A bytevc2-only list yields no playable tier; the H.265 variant of the
++        // same endpoint carries the real quality ladder.
++        if let Some(alt) = h265_fallback_url(&fallback_url) {
++            if Instant::now() < deadline {
++                if let Ok(h265_data) =
++                    fetch_fallback_video_info(ctx, video_id, source, &alt, deadline).await
++                {
++                    let h265_data = Arc::new(h265_data);
++                    let h265_rows = fallback_rows_from_body(h265_data.as_ref());
++                    if playable_variant_tier_count(&h265_rows) > 0 {
++                        rows = h265_rows;
++                        let mut cache = cache.lock().unwrap_or_else(|error| error.into_inner());
++                        if cache.len() < STREAM_BODY_LIMIT {
++                            cache.entry(alt).or_insert_with(|| h265_data.clone());
++                        }
++                    }
++                }
++            }
++        }
++    }
+     if playable_variant_tier_count(&rows) > 0 {
+         let mut cache = cache.lock().unwrap_or_else(|error| error.into_inner());
+         if cache.len() < STREAM_BODY_LIMIT {
+@@ -2228,6 +2294,27 @@ fn fallback_api_url(model: &Map<String, Value>) -> String {
+     u
+ }
+ 
++/// The same `fallback_api` endpoint re-served as H.265.
++///
++/// Some 漫剧 episodes only carry `bytevc2` (ByteDance VVC) tiers, and `codec_type=4`
++/// in the fallback URL asks for exactly those. No mpv build can decode VVC, so
++/// the client used to reject the episode outright even though the same endpoint
++/// happily returns `h265_hvc1` tiers when asked for `codec_type=1`. Rewriting
++/// the parameter is enough to get a playable stream.
++fn h265_fallback_url(url: &str) -> Option<String> {
++    let key = "codec_type=";
++    let start = url.find(key)? + key.len();
++    let rest = &url[start..];
++    let end = rest
++        .find(|c: char| c == '&' || c == '#')
++        .unwrap_or(rest.len());
++    let current = &rest[..end];
++    if current == "1" {
++        return None;
++    }
++    Some(format!("{}1{}", &url[..start], &rest[end..]))
++}
++
+ async fn fetch_fallback_video_info(
+     ctx: &Ctx,
+     video_id: &str,
+@@ -4113,3 +4200,36 @@ mod spade_vectors;
+ mod unsigned_get_cap;
+ #[cfg(test)]
+ mod variant_url_shapes;
++
++#[cfg(test)]
++mod h265_fallback {
++    use super::h265_fallback_url;
++
++    #[test]
++    fn bytevc2_request_is_rewritten_to_h265() {
++        let url = "https://vas.test/video/fplay/1/abc/def?aid=1967&codec_type=4&stream_type=encrypt";
++        assert_eq!(
++            h265_fallback_url(url).as_deref(),
++            Some("https://vas.test/video/fplay/1/abc/def?aid=1967&codec_type=1&stream_type=encrypt")
++        );
++    }
++
++    #[test]
++    fn last_parameter_without_separator_is_handled() {
++        let url = "https://vas.test/video/fplay/1/abc/def?aid=1967&codec_type=4";
++        assert_eq!(
++            h265_fallback_url(url).as_deref(),
++            Some("https://vas.test/video/fplay/1/abc/def?aid=1967&codec_type=1")
++        );
++    }
++
++    #[test]
++    fn already_h265_or_missing_parameter_needs_no_second_request() {
++        assert_eq!(
++            h265_fallback_url("https://vas.test/p?codec_type=1&aid=1967"),
++            None
++        );
++        assert_eq!(h265_fallback_url("https://vas.test/p?aid=1967"), None);
++        assert_eq!(h265_fallback_url(""), None);
++    }
++}
+diff --git a/rust/src/lib.rs b/rust/src/lib.rs
+index 0a324a0..d58e0f0 100644
+--- a/rust/src/lib.rs
++++ b/rust/src/lib.rs
+@@ -39,7 +39,7 @@ mod frb_generated;
+ #[cfg(test)]
+ mod network_proxy_tests;
+ 
+-#[cfg(any(target_os = "windows", target_os = "linux"))]
++#[cfg(any(target_os = "windows", target_os = "linux", target_os = "ios"))]
+ mod desktop_fetch;
+-#[cfg(any(target_os = "windows", target_os = "linux"))]
++#[cfg(any(target_os = "windows", target_os = "linux", target_os = "ios"))]
+ mod desktop_media;
+diff --git a/rust/src/network.rs b/rust/src/network.rs
+index 5d74693..70722e6 100644
+--- a/rust/src/network.rs
++++ b/rust/src/network.rs
+@@ -91,6 +91,14 @@ impl Policy {
+             }
+         }
+     }
++    #[cfg(target_os = "ios")]
++    pub(crate) fn configure_blocking(
++        &self,
++        builder: reqwest::blocking::ClientBuilder,
++    ) -> reqwest::blocking::ClientBuilder {
++        builder
++    }
++
+     #[cfg(any(target_os = "windows", target_os = "linux"))]
+     pub(crate) fn configure_blocking(
+         &self,
+diff --git a/rust/src/server.rs b/rust/src/server.rs
+index 691e2ec..5c19db2 100644
+--- a/rust/src/server.rs
++++ b/rust/src/server.rs
+@@ -68,6 +68,27 @@ struct AppState {
+     mode: ListenMode,
+ }
+ 
++/// Binds the listener, moving to an ephemeral port when the requested one is
++/// taken.
++///
++/// A fixed port from `config.json` is what the app normally asks for, but it is
++/// not always ours: another copy of the app (different applicationId, same
++/// loopback port) or a leftover listener can hold it. Failing startup over that
++/// is worse than quietly moving on - the Flutter transport reads the real port
++/// back from [`LoopbackHandle`], and nothing else hard-codes the number.
++async fn bind_with_fallback(addr: &str, port: u16) -> Result<tokio::net::TcpListener, String> {
++    match tokio::net::TcpListener::bind((addr, port)).await {
++        Ok(listener) => Ok(listener),
++        Err(e) if port != 0 => {
++            log::warn!("listen {addr}:{port} unavailable ({e}); falling back to an ephemeral port");
++            tokio::net::TcpListener::bind((addr, 0)).await.map_err(|fallback| {
++                format!("listen {addr}:{port}: {e}; retry on port 0: {fallback}")
++            })
++        }
++        Err(e) => Err(format!("listen {addr}:{port}: {e}")),
++    }
++}
++
+ pub async fn serve(
+     server: Arc<Server>,
+     port: u16,
+@@ -77,9 +98,7 @@ pub async fn serve(
+         ListenMode::Loopback => "127.0.0.1",
+         ListenMode::Lan => "0.0.0.0",
+     };
+-    let listener = tokio::net::TcpListener::bind((addr, port))
+-        .await
+-        .map_err(|e| format!("listen {addr}:{port}: {e}"))?;
++    let listener = bind_with_fallback(addr, port).await?;
+     let local = listener
+         .local_addr()
+         .map_err(|e| format!("local addr: {e}"))?;
+@@ -435,4 +454,21 @@ mod tests {
+             Err(StatusCode::PAYLOAD_TOO_LARGE)
+         );
+     }
++
++    #[tokio::test]
++    async fn a_taken_port_falls_back_to_an_ephemeral_one() {
++        let occupied = tokio::net::TcpListener::bind(("127.0.0.1", 0))
++            .await
++            .expect("bind a stand-in listener");
++        let taken = occupied.local_addr().expect("local addr").port();
++
++        let listener = bind_with_fallback("127.0.0.1", taken)
++            .await
++            .expect("a busy port must not fail startup");
++        assert_ne!(
++            listener.local_addr().expect("local addr").port(),
++            taken,
++            "the fallback must not reuse the occupied port"
++        );
++    }
+ }
+diff --git a/rust/src/upstream/client.rs b/rust/src/upstream/client.rs
+index 6336086..7b2088f 100644
+--- a/rust/src/upstream/client.rs
++++ b/rust/src/upstream/client.rs
+@@ -222,7 +222,12 @@ impl UpstreamClient {
+             }
+         }
+         if req.playback_sign {
++            // 2026-11-16: the player endpoints now silently return a 200 with an
++            // empty body unless `x-medusa` is present. The server does not
++            // validate its contents (an empty or arbitrary value is accepted),
++            // it only requires the header to be sent.
+             headers.retain(|(k, _)| !k.eq_ignore_ascii_case("x-medusa"));
++            headers.push(("x-medusa".to_string(), "1".to_string()));
+         }
+ 
+         let resp = self
+diff --git a/scripts/build_linux_package.sh b/scripts/build_linux_package.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/build_rust_backend.sh b/scripts/build_rust_backend.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/build_rust_ios.sh b/scripts/build_rust_ios.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/check_line_budget.sh b/scripts/check_line_budget.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/format_all.sh b/scripts/format_all.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/run_rust_host_tests.sh b/scripts/run_rust_host_tests.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/test_quick.sh b/scripts/test_quick.sh
+old mode 100644
+new mode 100755
+diff --git a/test/search_filters_test.dart b/test/search_filters_test.dart
+new file mode 100644
+index 0000000..6caaeb1
+--- /dev/null
++++ b/test/search_filters_test.dart
+@@ -0,0 +1,63 @@
++import 'package:flutter_test/flutter_test.dart';
++import 'package:fqapp/models/media_item.dart';
++import 'package:fqapp/services/search_filters.dart';
++
++MediaItem _book({
++  String title = '书',
++  List<String> categories = const [],
++  int status = -1,
++  int words = 0,
++}) => MediaItem(
++  id: title,
++  kind: 'book',
++  title: title,
++  cover: '',
++  author: '作者',
++  badge: '',
++  ep: '',
++  categories: categories,
++  creationStatus: status,
++  wordNumber: words,
++);
++
++void main() {
++  test('默认放行一切', () {
++    const filters = SearchFilters();
++    expect(filters.isActive, isFalse);
++    expect(filters.matches(_book(status: 1, words: 10)), isTrue);
++  });
++
++  test('按连载状态过滤', () {
++    const filters = SearchFilters(status: 0);
++    expect(filters.matches(_book(status: 0)), isTrue);
++    expect(filters.matches(_book(status: 1)), isFalse);
++    expect(filters.matches(_book(status: 4)), isFalse);
++    expect(filters.matches(_book(status: -1)), isFalse);
++  });
++
++  test('按字数档位过滤', () {
++    expect(const SearchFilters(wordCount: 1).matches(_book(words: 200000)), isTrue);
++    expect(const SearchFilters(wordCount: 1).matches(_book(words: 400000)), isFalse);
++    expect(const SearchFilters(wordCount: 2).matches(_book(words: 400000)), isTrue);
++    expect(const SearchFilters(wordCount: 3).matches(_book(words: 2000000)), isTrue);
++    expect(const SearchFilters(wordCount: 4).matches(_book(words: 3000000)), isTrue);
++    expect(const SearchFilters(wordCount: 4).matches(_book(words: 2999999)), isFalse);
++    expect(const SearchFilters(wordCount: 1).matches(_book(words: 0)), isFalse);
++  });
++
++  test('分类词优先匹配分类标签', () {
++    const filters = SearchFilters(tag: '都市');
++    expect(filters.matches(_book(categories: const ['都市', '爽文'])), isTrue);
++    expect(filters.matches(_book(categories: const ['玄幻'])), isFalse);
++    // 书名兜底：分类标签缺失时仍能命中带该词的作品。
++    expect(filters.matches(_book(title: '都市之巅')), isTrue);
++  });
++
++  test('clearTag 只清分类，保留其余条件', () {
++    const filters = SearchFilters(status: 0, wordCount: 4, tag: '都市');
++    final cleared = filters.copyWith(clearTag: true);
++    expect(cleared.tag, isNull);
++    expect(cleared.status, 0);
++    expect(cleared.wordCount, 4);
++  });
++}
+diff --git "a/\344\277\256\345\244\215\350\257\264\346\230\216_2026-11-16.md" "b/\344\277\256\345\244\215\350\257\264\346\230\216_2026-11-16.md"
+new file mode 100644
+index 0000000..613c9e2
+--- /dev/null
++++ "b/\344\277\256\345\244\215\350\257\264\346\230\216_2026-11-16.md"
+@@ -0,0 +1,260 @@
++# 修复说明 · 2026-11-16
++
++这份补丁基于 `master` 的 `5977625`（2026-11-16 拉取）打在工作区上，**没有 rebase 到最新**。
++完整改动见随包附带的 `fixes.patch`，也可以用 `git diff` 看。
++
++分两部分：
++
++1. **上游接口变更**（3 条）—— 这一天下午抖音/番茄那边改了校验，短剧、漫剧全线打不开；
++2. **iOS 端功能补全**（7 条）—— 仓库里的 iOS 骨架能编译出包，但播放、导入、登录、导出全是断的。
++
++---
++
++## 一、上游接口变更
++
++### 1. 播放请求必须带 `x-medusa`（短剧/漫剧全挂的直接原因）
++
++**现象**：`/novel/player/multi_video_model/v1/`、`/novel/player/video_model/v1/`、
++`/novel/player/multi_video_detail/v1/` 一律 `HTTP 200` + **空 body（0 字节）**。
++换 host、换 UA、补 `klink_egdi`、换 `ac=mobile` 全都没用。
++
++**定位过程**：用群里的 HAR 重放——原样重放 `200 / 100008 字节`，是正常的
++video_model JSON。接着做交叉实验（换 url / 换 body / 换 header 的各种组合），
++最后用「把 HAR 的 header 逐个追加到我们请求上」的办法二分，只有一个能翻转结果：
++
++```
+++content-length    → 0
+++cookie            → 0
+++x-gorgon          → 0
+++x-helios          → 0
+++x-medusa          → 22262  ✅
++```
++
++而且服务端**不校验内容**：空字符串、`AAAAAAAA`、随机 88 字节 Base64、
++截断到 40 字符，全部正常返回。它只认「有没有这个头」。
++
++**根因代码**：`rust/src/upstream/client.rs` 里原本是
++
++```rust
++if req.playback_sign {
++    headers.retain(|(k, _)| !k.eq_ignore_ascii_case("x-medusa"));
++}
++```
++
++注释写的是「播放请求不能带 x-medusa」——那是更早一版抓包得出的结论，现在上游
++反过来了。改成播放请求固定带一个占位值：
++
++```rust
++headers.retain(|(k, _)| !k.eq_ignore_ascii_case("x-medusa"));
++headers.push(("x-medusa".to_string(), "1".to_string()));
++```
++
++**验证**：`[stream] 200 OK`，`variants` 里有 1080P 地址与 `key_hex`。
++
++### 2. `mixed_video_id_map` 要同时带全部 content_type
++
++**现象**：短剧好了以后，一部分漫剧还是「播放失败」。
++
++`rust/src/endpoints/video.rs` 的 `multi_video_model_body()` 原来只发：
++
++```json
++{"mixed_video_id_map": {"1004": ["<id>"]}}
++```
++
++官方 HAR 里同一个请求同时带了 `"1004"` 和 `"1"`。实测：
++
++| content_type 键 | 漫剧 `7606644567206546456` | 短剧 `7705046529114901528` |
++|---|---|---|
++| `1004` | 200，`data` 为空 | 200，有模型 |
++| `1` | 200，有模型 | 200，有模型 |
++
++也就是说部分漫剧只在 `1` 这条上返回。现在改成把 id 同时挂在
++`1 / 1002 / 1004 / 1007` 四个键上（服务端不挑食，四种全发仍返回正常模型，
++短剧 22 KB、漫剧 18 KB）。这四种正是 `lib/models/related_series.dart:39`
++里认可的类型集合。
++
++### 3. bytevc2（VVC）专属的剧集：改问上游要 H.265
++
++**现象**：用户点名《大佬修仙满级回现代，我让全家横着走》看不了，报
++「该视频暂不支持播放」。
++
++**根因**：这部剧 5 个清晰度档位全是字节自研的 VVC 编码：
++
++```
++gear_des_key: 0:MP4|1:encrypt|2:bytevc2|4:360p
++                        ... 2:bytevc2|4:1080p
++```
++
++mpv 没有 VVC 解码器，`extract_fallback_video_source()` 返回 `CodecRejected`，
++走到 `video.rs:575` 的「该视频暂不支持播放」。
++
++**解法**：模型里自带的 `fallback_api.fallback_api` 是一个带 `codec_type=4`
++参数的播放地址。把参数改成 `codec_type=1` 再问同一个接口：
++
++| codec_type | 返回编码 |
++|---|---|
++| `4` | bytevc2（5 档，加密） |
++| **`1`** | **h265_hvc1（5 档，`1:normal` 未加密）** |
++| `2` / `0` | bytevc2 |
++
++改动都在 `rust/src/endpoints/video.rs`：
++
++* 新增 `fn h265_fallback_url(url: &str) -> Option<String>`，把 `codec_type=`
++  的值改写成 `1`；已经是 `1` 或没有这个参数则返回 `None`（不发多余请求）。
++* `resolve_video_source_fallback_status()` 里 `CodecRejected` 的分支先用改写后
++  的地址重取一次，命中就 `Found` 并写缓存。
++* `fallback_variant_rows()` 里，`playable_variant_tier_count(&rows) == 0` 时同样
++  去取 H.265 版本，这样播放页的清晰度列表也一起回来了（原来是空的）。
++
++附带 3 个单元测试（`mod h265_fallback`）。注意：这个兜底只在模型确实带
++`fallback_api` 时触发，所以 `bytevc2_only_is_terminal` 那条既有不变量在
++「没有 fallback 地址」的情况下仍然成立。
++
++---
++
++## 二、iOS 端补全
++
++原来的 iOS 只到「能编译、能起界面」，一进播放页就 `MissingPluginException`。
++
++| # | 内容 | 文件 |
++|---|---|---|
++| 1 | 视频播放：把 `fqapp/native_player` 通道接到进程内 media_kit（和 Windows 同一条 Dart 实现），新增 iOS 的 `IosPlatform.install()` | `lib/services/ios_platform.dart`（新）、`lib/main.dart` |
++| 2 | 打开视频能力开关，播放页/短剧页改用 media_kit 纹理渲染 | `lib/services/platform_capabilities.dart`、`lib/pages/player_page.dart`、`lib/pages/drama_page.dart` |
++| 3 | iOS 播放库只加 iOS 那一个包（不用 umbrella，避免多平台库一起进包）；亮屏锁 | `pubspec.yaml`、`pubspec.lock` |
++| 4 | 加密媒体（短剧 / 听书）链路：Rust 的 `desktop_media` / `desktop_fetch` 加 `target_os = "ios"`；`Cargo.toml` 给 iOS 开 `reqwest` blocking；`build.rs` 给 iOS 编 C 加密源；Dart 侧 iOS 改走 `DynamicLibrary.process()`（静态库没有可 `open` 的文件） | `rust/src/lib.rs`、`rust/Cargo.toml`、`rust/build.rs`、`rust/src/network.rs`、`lib/services/desktop_media.dart` |
++| 5 | 中文 TXT 导入：原来无条件 `DynamicLibrary.open('kernel32.dll')` 转 GB18030，iOS 上必挂（界面只剩「请重试」）。改为非 Windows 走 iconv，并在 xcconfig 里加 `-liconv` | `lib/services/desktop_platform.dart`、`ios/Flutter/{Debug,Release}.xcconfig` |
++| 6 | 导入图书选不中文件：iOS 的 `UIDocumentPicker` 只认 UTI，`file_selector_ios` 在 `uniformTypeIdentifiers` 为空时直接抛 `ArgumentError`（选择器根本不弹）。iOS 分支改用 `public.plain-text` / `org.idpf.epub-container` | `lib/services/desktop_platform.dart` `pickBook()` |
++| 7 | 番茄登录（WKWebView 读 cookie）与导出文件（系统分享面板）；后台听书 | `ios/Runner/AppDelegate.swift`、`ios/Runner/Info.plist` |
++
++另外把 `scripts/*.sh` 补上了可执行位——`IOS.md` 里写的
++`./scripts/build_rust_ios.sh` 在干净 checkout 上是 `Permission denied`。
++
++---
++
++## 三、自己打包
++
++### iOS（有证书，出可安装的 ipa）
++
++```bash
++# 1. 依赖
++flutter pub get
++
++# 2. Rust 静态库（产出 ios/Frameworks/libfqapi_core.a）
++./scripts/build_rust_ios.sh
++
++# 3. Pods（首次会顺带下载 mpv/libmpv，需要能出网）
++cd ios && pod install && cd ..
++
++# 4. 编包（不签名）
++flutter build ios --release --no-codesign
++# → build/ios/iphoneos/Runner.app
++```
++
++签名（没有 Xcode 账号自动签名时，手动签最省事）：
++
++```bash
++APP=build/ios/iphoneos/Runner.app
++ID="iPhone Distribution: <你的名字> (<TEAMID>)"
++
++# 从描述文件里取 entitlements
++security cms -D -i 你的.mobileprovision > /tmp/profile.plist
++plutil -extract Entitlements xml1 -o /tmp/entitlements.plist /tmp/profile.plist
++
++cp 你的.mobileprovision "$APP/embedded.mobileprovision"
++for f in "$APP"/Frameworks/*.framework "$APP"/Frameworks/*.dylib; do
++  codesign --force --sign "$ID" --timestamp=none "$f"
++done
++codesign --force --sign "$ID" --timestamp=none \
++  --entitlements /tmp/entitlements.plist "$APP"
++codesign --verify --deep --strict "$APP"
++
++mkdir -p /tmp/pack/Payload
++ditto "$APP" /tmp/pack/Payload/Runner.app
++(cd /tmp/pack && zip -qry out.ipa Payload)
++```
++
++**Bundle ID 必须等于描述文件里 `application-identifier` 去掉 Team 前缀的那一段。**
++项目里改三处 `PRODUCT_BUNDLE_IDENTIFIER`（`ios/Runner.xcodeproj/project.pbxproj`
++的 Debug / Profile / Release），或者直接在 Xcode 的 Signing 里改。
++
++### iOS 构建的两个坑（我这次踩了 3 小时）
++
++* **不要放在 iCloud 同步目录里构建**（`~/Documents`、`~/Desktop` 都会中招）。
++  fileproviderd 会不停往文件上写回 `com.apple.FinderInfo`，于是
++  `flutter assemble` 的 `release_unpack_ios` 步骤 codesign 会报
++  `resource fork, Finder information, or similar detritus not allowed`，
++  而 Flutter 只给你显示一句误导性的
++  「Building a deployable iOS app requires a selected Development Team」。
++  把工程和工具链挪到 `~/dev` 之类普通目录即可。想看真实报错：
++  `codesign -f -s - --verbose=4 build/ios/Release-iphoneos/Flutter.framework/Flutter`。
++* **CocoaPods 的 CDN 被墙**时，`pod install` 会卡在 `FlutterMacOS` 这个
++  pod 名上（`cdn.cocoapods.org` 302 到 `cdn.jsdelivr.net`）。即使只编 iOS，
++  darwin 插件的 podspec 里也有 `s.osx.dependency 'FlutterMacOS'`。
++  临时解法是建一个只有占位 spec 的本地仓库，然后在 `ios/Podfile` 的
++  `platform :ios, '15.0'` 后面加一行
++  `source 'file:///你的路径/cocoapods-specs'`
++  （占位 spec 内容：`{"platforms":{"osx":"12.0"},"source_files":"FlutterMacOS.h"}`，
++  放在 `FlutterMacOS/1.0.0/FlutterMacOS.podspec.json`）。**这个改动我没有带进补丁**，
++  因为路径是本机的；网络正常时不需要。
++
++### Android
++
++```bash
++flutter pub get
++./scripts/build_rust_backend.sh        # 需要 NDK 28.2.13676358（脚本里 pin 死）
++flutter build apk --release --target-platform android-arm,android-arm64 --split-per-abi
++```
++
++release 签名走环境变量（`RELEASE_KEYSTORE_FILE` / `RELEASE_STORE_PASSWORD` /
++`RELEASE_KEY_ALIAS` / `RELEASE_KEY_PASSWORD`），见 `android/app/build.gradle.kts`
++和 `.github/workflows/android-apk.yml`。
++
++---
++
++## 四、排查工具：`rust/examples/video_probe.rs`
++
++这次定位全靠它，建议留着。它用真实的上游初始化 core，然后：
++
++```bash
++# 完整取流（和 App 走同一条链路）
++cargo build --release --example video_probe
++./target/release/examples/video_probe <运行时目录> <video_id>
++
++# 直接打某个会话内接口，看原始 body
++./target/release/examples/video_probe <运行时目录> "path:/api/v1/books/<id>/detail"
++```
++
++运行时目录里放 `config/config.json`、`config/device_pool.json`、
++`config/filter.json`（从 `assets/` 拷一份，device_pool 用 example 改名）。
++
++输出里关键是这几行：
++
++```
++dragon-batch empty response body; body_len=0      → 已被上游静默拒绝（看 x-medusa）
++... result=codec_rejected                          → 只给了 bytevc2
++[stream] 200 OK ... variants=[...]                 → 正常
++```
++
++---
++
++## 五、已知限制
++
++* **VVC（bytevc2）仍然解不了**。现在只是遇到纯 VVC 的剧集时改问上游要 H.265；
++  如果某剧连 H.265 都不给，仍然只能报「暂不支持播放」。
++* iOS 的视频实现是 Dart 侧 media_kit（和 Windows 同一条路径），所以没有
++  画中画、悬浮窗、锁屏控制这些平台特性；听书后台播放靠
++  `UIBackgroundModes: audio`。
++* 上游随时可能再改校验。下次短剧/漫剧集体 200 空 body 时，先按上面
++  「抓一份官方 HAR → 拿我们的请求和它做 header 差集」的路子走一遍，
++  通常能很快定位到是哪个头/参数变了。
++
++---
++
++## 六、仅供参（本机验证环境）
++
++macOS 27.3 / Xcode 27.2 (27B52) / Flutter 3.50.0 (`ab2912035e`) /
++Dart 3.14.0 / Rust 1.99.1 (`aarch64-apple-ios`) / CocoaPods 1.17.0
++（系统 Ruby 2.6 太老，CocoaPods 1.17 装不上，是自建 Ruby 3.3.6 + OpenSSL 3.0.12）。
++
++验证结果：`flutter analyze` 干净、`cargo test --release` 全绿、
++`codesign --verify --deep --strict` 通过。

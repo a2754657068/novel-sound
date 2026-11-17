@@ -222,7 +222,12 @@ impl UpstreamClient {
             }
         }
         if req.playback_sign {
+            // 2026-11-16: the player endpoints now silently return a 200 with an
+            // empty body unless `x-medusa` is present. The server does not
+            // validate its contents (an empty or arbitrary value is accepted),
+            // it only requires the header to be sent.
             headers.retain(|(k, _)| !k.eq_ignore_ascii_case("x-medusa"));
+            headers.push(("x-medusa".to_string(), "1".to_string()));
         }
 
         let resp = self
