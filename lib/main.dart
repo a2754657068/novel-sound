@@ -15,6 +15,7 @@ import 'package:hive_ce_flutter/hive_flutter.dart';
 
 import 'dart:async';
 
+import 'services/ios_platform.dart';
 import 'services/linux_platform.dart';
 
 import 'pages/home_page.dart';
@@ -91,6 +92,8 @@ Future<void> _prepareRuntime() async {
   registerPortedUiLicenses();
   if (isLinuxDesktop) await LinuxPlatform.install();
   if (isWindowsDesktop) await DesktopPlatform.instance.initialize();
+  // iOS 没有原生播放器通道：把 fqapp/native_player 接到进程内的 media_kit。
+  if (isIOSDevice) await IosPlatform.install();
   // 应用内日志：接管 debugPrint 与 FlutterError.onError，未处理异步异常由
   // [main] 的 runZonedGuarded 捕获；文件持久化异步开启，失败只退回内存模式。
   AppLog.instance.install();
