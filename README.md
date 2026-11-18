@@ -1,4 +1,4 @@
-<p align="center">
+﻿<p align="center">
   <img src="assets/images/app_logo.webp" width="120" alt="什锦铺">
 </p>
 
@@ -26,7 +26,7 @@
 
 “fqapp → novel-sound”只是 GitHub 仓库改名，repo id 没变；`fqapp` 仍然出现在 Android 包名、Windows 产物和 Dart/Rust 包名里。
 
-本仓库 fork 自上游，保留完整 Git 历史，代码改动以 PR 形式提交回上游（见 [PR #427](https://github.com/ch6vip/novel-sound/pull/427)）。
+本仓库 fork 自上游，保留完整 Git 历史，代码改动以 PR 形式提交回上游（见 [PR #429](https://github.com/ch6vip/novel-sound/pull/429)）。
 
 ## 这个 fork 改了什么
 
