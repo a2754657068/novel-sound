@@ -1049,11 +1049,12 @@ class _RootShellState extends State<RootShell> with TickerProviderStateMixin {
       ),
       // 上游 Wenku8 GlassDock：胶囊、拖动预览和液态玻璃选中区；短剧视频流
       // 与 OLED 纯黑下改用同色静态底板，不对每帧变化的画面做实时折射。
+      //
+      // 底部四个入口常驻：`DockAutoHide` 仍然存在（刷新路由时会 reveal），
+      // 但不再参与「下滚收起 / 上滑露出」——`DockAutoHideSlide` 现在只做
+      // 位移动画的承载，hide 恒为 null，dock 不会自己滑走。
       bottomNavigationBar: DockAutoHideSlide(
-        // 下滚收起 / 上滑露出（PiliPlus 同参：500ms、强调三段曲线）。
-        hide: _dockAutoHide,
-        // 墨水屏已通过 disabledProbe 完全禁用收起；此处仅保证进入 eink 时
-        // reveal 回正过渡零帧落位（与 _startPageMotion 降级约定一致）。
+        hide: const AlwaysStoppedAnimation<bool>(false),
         reduceMotion: einkModeNotifier.value,
         child: ShellDock(
           selectedIndex: _index,
