@@ -45,8 +45,14 @@
   libmpv（`Mpv.xcframework`）；`supportsVideoPlayback` 放开 iOS。
 - **加密媒体的取流**：Rust 的 `desktop_media` / `desktop_fetch` 模块与 CENC 解密所需的 C 源
   一并编进 iOS 目标，短剧这类带 `encrypt_info` 的片子才能在 iOS 上播。
-- **导入图书**：`file_selector_ios` 只认 UTI，补 `public.plain-text` / `org.idpf.epub-container`；
-  GBK 编码的 TXT 用 iconv 解码（原来在 iOS 上调 `kernel32.dll` 必然失败）。
+- **导入图书**：修了两个 iOS 专属问题——
+  ① **文件管理器根本弹不出来**：`file_selector_ios` 的 `UIDocumentPicker` 只认 UTI，
+  而我们原来只传了 `extensions`，插件在 `uniformTypeIdentifiers` 为空时直接抛
+  `ArgumentError`（`The provided type group … should either allow all files, or have a
+  non-empty "uniformTypeIdentifiers"`），所以点「导入图书」没有任何反应；
+  现在按平台分别传 `public.plain-text` / `org.idpf.epub-container`（iOS）与 `txt` / `epub`（其它平台）。
+  ② **GBK 的 TXT 打不开**：原解码逻辑在 UTF-8 失败时调 `kernel32.dll` 的 `MultiByteToWideChar`，
+  iOS 上必然失败；改成 `iconv`（`GB18030` → `GBK` → `CP936` 逐个尝试）。
 - **番茄登录/采集**：`AppDelegate.swift` 里用 `WKWebView` 打开 `fanqienovel.com` 登录页，
   点「读取书架」把 cookie 交回 Dart（`FanqieLoginBridge`）。
 - **文件导出**：`IosFilesBridge` 走 `UIActivityViewController` 分享面板，
@@ -55,13 +61,30 @@
   `MPNowPlayingInfoCenter` + `MPRemoteCommandCenter`（锁屏/控制中心卡片、耳机键、
   来电打断、拔耳机暂停），并区分 `.spokenAudio` / `.moviePlayback` 音频会话模式。
 
-### 二、上游接口变化导致的播放故障（这几次修复是上游改了服务端）
+### 二、播放链路的修复（包含上游方案）
+
+**短剧/漫剧全部「播放失败」**：2026-11-16 起上游把取流接口换成了 V5 门
+（`V5_PLAYER_URL = https://api5-normal-sinfonlinea.fqnovel.com/novel/player/multi_video_model/player/v1`），
+请求体要 gzip 压缩、并带一整套 `x-gorgon` / `x-argus` / `x-ladon` / `x-helios` / `x-medusa` /
+`x-khronos` 签名头，旧接口对任何客户端都返回 `200` + 空 body。
+
+本分支**采用上游的修复**：作者在 [PR #425](https://github.com/ch6vip/novel-sound/pull/425)
+（V5 播放签名）里实现了完整签名，我们的代码就是他的实现——
+`rust/src/sign/v5.rs`（`V5Identity` / `sign_playback_v5`）+ `rust/src/upstream/client.rs`
+的 `v5_playback()`（「Calls the v5 playback door with the exact gzip bytes it signs」）+
+`rust/src/endpoints/video.rs` 的 `v5_playback_body()` / `fetch_v5_video_model()`，
+
+
+> 说明：V5 之前我们曾用「保留 `x-medusa` 请求头 + 多挂 `content_type`」的临时方案绕过空 body。
+> 那套做法**已废弃并删除**，现在 `x-medusa` 只是 V5 签名头集合里的一项，由 `sign/v5.rs` 生成，
+> 不再靠它单独触发播放。
+
+另外两处仍然是我们自己补的兼容逻辑：
 
 | 现象 | 真因 | 修复 |
 |---|---|---|
-| 短剧/漫剧全部「播放失败」 | 播放请求必须带 `x-medusa` 头，客户端原来主动把它剥掉 | 保留该头 |
-| 部分漫剧、短剧「该视频暂不支持播放」 | `mixed_video_id_map` 的 `content_type` 只发了 `1004` | 同时挂 `1 / 1002 / 1004 / 1007` |
-| 某些剧全部档位都是 bytevc2（VVC） | mpv 无解码器，上游模型里 `codec_type=4` | 自动改写为 `codec_type=1` 取 H.265 版本 |
+| 某些剧全部档位都是 bytevc2（VVC），mpv 解不了 | 上游模型只给 `codec_type=4`（VVC）档位 | 自动改写为 `codec_type=1` 重新请求，拿 H.265 版本并缓存（`h265_fallback_url`） |
+| 部分剧「该视频暂不支持播放」 | 只有 VVC 档位时 `extract_fallback_video_source` 直接 `CodecRejected` | 同上：先回落 H.265，再给清晰度列表 |
 
 ### 三、阅读与播放体验
 
@@ -69,7 +92,9 @@
   支持「小说 / 短剧 · 漫剧」切换、完结状态、字数档位、标签筛选，筛选全部在本地完成
   （上游接口忽略 `limit`/`offset`，且筛选项其实不过滤，所以不能依赖它）。
 - **首页小说推荐三段式**：第一段排行榜不变 → 「完结推荐」「连载推荐」两条横滑
-  （各 10 本，日期/启动种子 → 每次打开换一批）→「更多推荐」纵向网格，下滑自动加载。
+  （各 10 本，日期/启动种子 → 每次打开换一批）→「更多推荐」纵向网格，
+  列表末尾是**「加载更多推荐」按钮**，由用户点击加载下一批（不是下滑自动加载，
+  自动加载在真机上遇到过列表不刷新的问题，已改回显式按钮）。
 - **常读类型加权**：从阅读历史与阅读时长统计用户常看的类型，只对「更多推荐」加权
   （最多 3 个类型、保留探索位），完结/连载两栏不加权，避免越用越窄。
 - **首页顶栏**：去掉与底部重复的「短剧」「漫剧」，四项（推荐 / 小说 / 漫画 / 听书）平分整行。
