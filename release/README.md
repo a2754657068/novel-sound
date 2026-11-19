@@ -4,8 +4,8 @@
 最低系统要求 iOS 15.0，arm64（真机）。
 
 ```
-sha256  c62a44b4c194540fb48c3941fd5f6f2f23e7527a65c19e7386a4d5f7eb38148f
-size    29143089 bytes
+sha256  bb63374de2cd98824d56f615e99238babff89a664d6bd7438ee078df35ce9fd3
+size    29142945 bytes
 ```
 
 用法：用自己的 `.p12` + `.mobileprovision` 重签（签名工具的「导入 IPA」功能，或用

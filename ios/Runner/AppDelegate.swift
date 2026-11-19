@@ -92,8 +92,11 @@ final class SecureKeyBridge {
 
   private static func write(_ key: String, _ value: String) throws {
     let data = Data(value.utf8)
-    var update = query(key)
-    update[kSecValueData as String] = data
+    // SecItemUpdate 的 attributesToUpdate 只能是「要改的属性」：把 kSecClass /
+    // kSecAttrService / kSecAttrAccount 一起塞进去，iOS 26 起会直接报
+    // errSecNoSuchAttr（-25303，The specified attribute does not exist），
+    // 于是新建密钥这一步永远失败。
+    let update: [String: Any] = [kSecValueData as String: data]
     let updated = SecItemUpdate(query(key) as CFDictionary, update as CFDictionary)
     if updated == errSecSuccess { return }
     if updated != errSecItemNotFound { throw KeychainError(updated) }

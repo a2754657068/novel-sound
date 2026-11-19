@@ -2,176 +2,130 @@
   <img src="assets/images/app_logo.webp" width="120" alt="什锦铺">
 </p>
 
-<h1 align="center">什锦铺</h1>
+<h1 align="center">什锦铺 · iOS 维护分支</h1>
 
 <p align="center">
-  <strong>让阅读和追剧，简单一点。</strong><br>
-  小说 · 听书 · 短剧 · 漫剧 · 漫画
+  小说 / 短剧 / 漫剧 / 听书 / 漫画，一个书架装完
 </p>
 
-<p align="center">
-  <a href="https://github.com/ch6vip/novel-sound/releases/latest"><img src="https://img.shields.io/github/v/release/ch6vip/novel-sound?label=Release&color=E89B35" alt="最新版本"></a>
-  <img src="https://img.shields.io/badge/Android%20%7C%20Windows-087E8B" alt="支持 Android 和 Windows">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-blue" alt="GPL-3.0 开源协议"></a>
-</p>
-
-<p align="center">
-  <a href="#主要功能">主要功能</a> ·
-  <a href="#下载与安装">下载安装</a> ·
-  <a href="#常见问题">常见问题</a> ·
-  <a href="DEVELOPMENT.md">开发文档</a>
-</p>
+> **上游项目：[ch6vip/novel-sound](https://github.com/ch6vip/novel-sound)**（GPL-3.0）
+>
+> 本仓库是基于上游的个人维护分支，**主要目标是让 iOS 能装上、能用**；
+> 上游本身只发布 Android / Windows 版本，官方也明确写了「目前没有正式的 iPhone 安装包」。
 
 ---
 
-什锦铺是一款支持 **安卓和 Windows** 的开源阅读与影音应用。在线看故事，也能导入自己的电子书，把喜欢的作品和进度留在书架里。
+## 分支信息
 
-## 主要功能
+| 项 | 值 |
+|---|---|
+| 本分支 | `custom-ios-2026-11-19` |
+| 基于上游版本 | `1.0.204+209` |
+| 主要维护平台 | iOS 15.0+（真机，arm64） |
+| 未签名 IPA | [`release/fqapp_ios_unsigned.ipa`](release/fqapp_ios_unsigned.ipa)（见 [release/README.md](release/README.md)） |
+| 变更清单 | [变更说明_2026-11-19.md](变更说明_2026-11-19.md)、[变更说明_2026-11-18.md](变更说明_2026-11-18.md)、[修复说明_2026-11-16.md](修复说明_2026-11-16.md) |
 
-### 📖 看小说，听故事
+上游在 2026-11-17 发布了 `1.0.205`，新增了云盘/多设备同步、UGC 短篇等功能。
+本分支**暂不跟进**：那次改动重写了播放器的平台通道，合并后 iOS 侧的视频与听书会失效，
+需要把 iOS 播放链路整段重做，工作量大于收益。
 
-- 在线阅读小说，也能导入 TXT / EPUB 电子书。
-- 字体、字号、翻页方式随心调，支持深色、纯黑和墨水屏模式。
-- 支持系统朗读和真人有声书，可调倍速、定时停止、后台播放。
+---
 
-### 🎬 追短剧，看漫画
+## 在原作者基础上添加/修改了什么
 
-- 短剧、漫剧、漫画集中浏览，按作品名称或编号搜索。
-- 自动保存阅读和播放进度，下次打开接着看。
+### 一、iOS 平台支持（本分支最主要的工作）
 
-### 📚 整理书架，离线慢慢看
+上游代码里虽然有 `ios/` 目录，但没有可用的 iOS 播放实现，也没有构建链。本分支补齐：
 
-- 收藏喜欢的作品，分组整理，导出备份后可在新设备恢复。
-- 提前下载内容，没网时继续阅读或播放。
+- **Rust 核心接入 iOS**：`scripts/build_rust_ios.sh` 把 `fqapi_core` 编成
+  `aarch64-apple-ios` 静态库，通过 `-force_load` 链进 App（`DEAD_CODE_STRIPPING = NO`，
+  否则 `dlsym` 找不到符号），Dart 侧走 flutter_rust_bridge 的 `ExternalLibrary.process()`。
+- **视频播放**：新增 `lib/services/ios_platform.dart`，把 `fqapp/native_player` 的方法/事件通道
+  接到桌面端那套 media_kit 实现上；`pubspec.yaml` 补 `media_kit_libs_ios_video` 带入
+  libmpv（`Mpv.xcframework`）；`supportsVideoPlayback` 放开 iOS。
+- **加密媒体的取流**：Rust 的 `desktop_media` / `desktop_fetch` 模块与 CENC 解密所需的 C 源
+  一并编进 iOS 目标，短剧这类带 `encrypt_info` 的片子才能在 iOS 上播。
+- **导入图书**：`file_selector_ios` 只认 UTI，补 `public.plain-text` / `org.idpf.epub-container`；
+  GBK 编码的 TXT 用 iconv 解码（原来在 iOS 上调 `kernel32.dll` 必然失败）。
+- **番茄登录/采集**：`AppDelegate.swift` 里用 `WKWebView` 打开 `fanqienovel.com` 登录页，
+  点「读取书架」把 cookie 交回 Dart（`FanqieLoginBridge`）。
+- **文件导出**：`IosFilesBridge` 走 `UIActivityViewController` 分享面板，
+  备份、TXT 导出、番茄采集都能「存储到文件 / 隔空投送」。
+- **听书与视频的系统级控制**：`AudioSessionBridge` 提供
+  `MPNowPlayingInfoCenter` + `MPRemoteCommandCenter`（锁屏/控制中心卡片、耳机键、
+  来电打断、拔耳机暂停），并区分 `.spokenAudio` / `.moviePlayback` 音频会话模式。
 
-## 下载与安装
+### 二、上游接口变化导致的播放故障（这几次修复是上游改了服务端）
 
-前往 [**下载最新版**](https://github.com/ch6vip/novel-sound/releases/latest) 获取安装包和更新说明。
+| 现象 | 真因 | 修复 |
+|---|---|---|
+| 短剧/漫剧全部「播放失败」 | 播放请求必须带 `x-medusa` 头，客户端原来主动把它剥掉 | 保留该头 |
+| 部分漫剧、短剧「该视频暂不支持播放」 | `mixed_video_id_map` 的 `content_type` 只发了 `1004` | 同时挂 `1 / 1002 / 1004 / 1007` |
+| 某些剧全部档位都是 bytevc2（VVC） | mpv 无解码器，上游模型里 `codec_type=4` | 自动改写为 `codec_type=1` 取 H.265 版本 |
 
-| 平台 | 系统要求 | 下载 |
-| --- | --- | --- |
-| 安卓 | Android 7.0 及以上 | [推荐安装包](https://github.com/ch6vip/novel-sound/releases/latest/download/app-arm64-v8a-release.apk) |
-| Windows | Windows 10 / 11，64 位 | [进入下载页](https://github.com/ch6vip/novel-sound/releases/latest) |
+### 三、阅读与播放体验
 
-- **安卓**：大多数手机选择推荐安装包；旧款 32 位设备使用[备用安装包](https://github.com/ch6vip/novel-sound/releases/latest/download/app-armeabi-v7a-release.apk)。
-- **Windows**：下载 Windows 压缩包，完整解压后打开 `fqapp.exe`，保留同目录的其他文件。更多用法见 [Windows 说明](WINDOWS.md)。
+- **分类独立二级页**（`category_detail_page.dart`）：官方分类池 + 子分类轮换采样，
+  支持「小说 / 短剧 · 漫剧」切换、完结状态、字数档位、标签筛选，筛选全部在本地完成
+  （上游接口忽略 `limit`/`offset`，且筛选项其实不过滤，所以不能依赖它）。
+- **首页小说推荐三段式**：第一段排行榜不变 → 「完结推荐」「连载推荐」两条横滑
+  （各 10 本，日期/启动种子 → 每次打开换一批）→「更多推荐」纵向网格，下滑自动加载。
+- **常读类型加权**：从阅读历史与阅读时长统计用户常看的类型，只对「更多推荐」加权
+  （最多 3 个类型、保留探索位），完结/连载两栏不加权，避免越用越窄。
+- **首页顶栏**：去掉与底部重复的「短剧」「漫剧」，四项（推荐 / 小说 / 漫画 / 听书）平分整行。
+- **播放页**：评论按钮上方加「收藏」（短剧/漫剧一键进书架）；全屏胶囊挪到信息区上方居中，
+  半透明不挡字幕。
+- **书架**：新增按媒介筛选（全部/小说/漫画/短剧/漫剧/听书），底部 dock 常驻不隐藏。
 
-Linux / Arch 社区移植正在推进，见 [#308](https://github.com/ch6vip/novel-sound/issues/308)。目前没有正式的 Linux、iPhone 或 Mac 安装包。
+### 四、iOS 上的稳定性修复
 
-### 开始使用
+- **后台整章播完不续播**：iOS 在音频停掉后约 1 秒挂起进程，换章那几步跑不完。
+  现在后台收到「本章播完」立刻走 `_advanceInBackground()`，在**同一个 mpv 实例上原地换源**
+  （后台新建播放器会卡在音频输出初始化），并用 `beginBackgroundTask` 借一段后台额度。
+- **离线缓存打不开**：`SecureKeyBridge.write` 把 `kSecClass` 等查询键塞进了
+  `SecItemUpdate` 的更新字典，iOS 26/27 返回 `errSecNoSuchAttr(-25303)`，导致 Hive 密钥
+  永远建不出来。改为只提交 `kSecValueData`。
 
-1. **找作品**：在首页浏览，或搜索作品名称、编号。
-2. **导入自己的书**：在书架菜单选择「导入图书」，打开 TXT / EPUB 文件。
-3. **下载小说**：在作品详情点「下载」，在「我的 → 离线缓存」管理已下载内容。
+---
 
-看小说时点击屏幕中间，可以调整阅读设置。主题和听书选项在「我的 → 设置」；经典主题点击右上角齿轮。
+## 平台支持现状
 
-## 常见问题
+| 平台 | 状态 |
+|---|---|
+| **iOS 15+** | **主要维护目标**，本轮所有验证都在 iPhone 真机上完成 |
+| Android | 代码保留、可构建（`scripts/build_rust_backend.sh` + `flutter build apk`），理论上可用；但本分支主要精力在 iOS，**不保证所有功能与 iOS 一致**（历史上曾出现个别页面未适配的情况） |
+| Windows | 需要 Windows 主机 + VS2022 + MSVC 自行编译（macOS 无法交叉编译），**不提供二进制、不保证功能完整** |
+| macOS / Linux | 上游本来就没有正式包，本分支同样不提供 |
 
-<details>
-<summary><b>没网也能用吗？</b></summary>
+---
 
-可以看已导入的电子书、读已缓存的章节、播放已下载的媒体。只有已下载完成的内容才能离线使用，搜索和获取新内容仍需要联网。启动时可选择「离线阅读」。
+## 构建（iOS）
 
-</details>
+```bash
+# 1. 依赖（macOS + Xcode 27 + Flutter 3.50 + Rust 1.99 + CocoaPods 1.17）
+flutter pub get
 
-<details>
-<summary><b>一直加载、搜索失败或播放不了，怎么办？</b></summary>
+# 2. 编 Rust 静态库（要求已装 xcode-select / 见 IOS.md）
+./scripts/build_rust_ios.sh          # 产物：ios/Frameworks/libfqapi_core.a
 
-先检查网络，换个网络或重启应用再试。在线内容依赖第三方服务，对方调整或网络波动可能导致暂时不可用。
+# 3. 编 App
+flutter build ios --release --no-codesign
+# 产物：build/ios/iphoneos/Runner.app
 
-持续失败请[反馈问题](https://github.com/ch6vip/novel-sound/issues)，附上应用版本、设备型号、作品名称或编号，以及错误截图。
-
-</details>
-
-<details>
-<summary><b>使用代理或广告过滤时提示设备注册连接失败，重试无效？</b></summary>
-
-首次使用在线内容时，应用需要通过 HTTPS 连接 `log.snssdk.com:443` 完成上游设备注册。部分广告过滤规则会把该域名归为日志服务并拒绝连接；在规则未改变时，重复点击重试仍会失败。该提示也可能由 DNS、连接或上游服务异常引起，不能仅凭 TLS 错误断定被拦截。
-
-无需关闭代理、TUN/VPN 或全部广告过滤。先在代理／DNS 过滤工具中查看该域名的请求记录；如果明确命中拒绝规则，仅为 **`log.snssdk.com`** 添加允许例外，优先于拒绝规则，并继续使用你选择的出口。不要放行整个 `snssdk.com` 域名族。
-
-对于 Clash / Mihomo，将精确域名规则插入现有 `rules` 列表并置于广告拒绝规则之前，策略选用你已有的适用出口。支持 `prepend` 规则扩展的客户端（如 Clash Verge Rev）也可按下例配置；**仅在你希望该域名直连时**使用 `DIRECT`：
-
-```yaml
-prepend:
-  - DOMAIN,log.snssdk.com,DIRECT
+# 4. 自己签名（示例）
+#    - 需要 .p12 + .mobileprovision
+#    - 注意：entitlements 里不要保留描述文件中的 keychain-access-groups（通配符组无效）
+ditto build/ios/iphoneos/Runner.app Payload/Runner.app
+zip -qry fqapp.ipa Payload
 ```
 
-若该域名需要经代理连接，把 `DIRECT` 换成你已有的代理策略组名称；请勿照抄他人的代理端口。保存并应用配置后，确认该规则位于广告拒绝规则之前，再回应用点击重试。DNS 层过滤也需要在对应工具中添加精确域名例外。
+更细的签名步骤、踩过的坑（iCloud 目录导致 `codesign` 报 `resource fork, Finder information…`、
+CocoaPods CDN 被墙需要本地 FlutterMacOS 占位 spec 等）都写在
+[变更说明_2026-11-19.md](变更说明_2026-11-19.md) 与 [IOS.md](IOS.md) 里。
 
-应用按配置使用网络出口，不会自动改写过滤规则、绕过显式代理、忽略证书校验或把失败的 HTTPS 降为 HTTP。若允许后仍失败，请反馈应用版本、失败时间及脱敏后的域名／命中规则；不要公开代理订阅、凭据、完整签名 URL 或设备标识。已导入／缓存的内容仍可离线阅读。
+---
 
-</details>
+## 许可
 
-<details>
-<summary><b>换设备怎么搬书架和进度？</b></summary>
-
-在「我的 → 备份与导入」导出备份文件，传到新设备后选择「从备份文件恢复」，预览并确认。
-
-或者使用WebDAV云同步在「我的 → 备份与导入 → WebDAV 同步」填写你的WebDAV地址、用户名和密码 最后点击「保存并立即同步」在新设备上执行同样的操作即可。
-
-备份包含收藏、书架分组、已保存的阅读和播放进度、已看剧集；不包含本地电子书、下载缓存、阅读时长、划线和设置。导出前先退出阅读或暂停播放，让进度保存，本地书文件请单独保留。
-
-</details>
-
-<details>
-<summary><b>系统朗读没有声音？</b></summary>
-
-检查媒体音量，并确认设备安装了语音引擎和中文音色。在「设置 → 听书 → 系统朗读」选择可用语音；Windows 用户可在系统语音设置中安装中文音色。
-
-</details>
-
-## 参与与支持
-
-使用中遇到问题，或有想要的功能，欢迎[提交反馈](https://github.com/ch6vip/novel-sound/issues)。想一起改进项目，可以查看[贡献指南](CONTRIBUTING.md)和[开发文档](DEVELOPMENT.md)。
-
-### 🤝 QQ 交流群
-
-欢迎加入 **什锦铺** 交流群，分享使用心得、交流问题。用 QQ 扫码，或搜索群号 **726870896** 加入。
-
-<p align="center">
-  <a href=".github/qq-group.jpg">
-    <img src=".github/qq-group.jpg" width="320" alt="QQ 交流群：什锦铺，群号 726870896">
-  </a>
-</p>
-
-### ❤️ 赞助
-
-如果什锦铺让你的阅读和追剧更方便，欢迎点个 [⭐ Star](https://github.com/ch6vip/novel-sound/stargazers)。也可以通过[爱发电](https://afdian.com/a/ch6vip)、微信或支付宝请作者喝杯咖啡，支持后续更新。
-
-<p align="center">
-  <a href=".github/wechat.png">
-    <img src=".github/wechat.png" width="640" alt="赞助什锦铺：微信支付和支付宝收款码">
-  </a>
-</p>
-
-点击图片可查看原图，方便扫码。
-
-## 👥 贡献者
-
-感谢每一位参与改进什锦铺的朋友。
-
-<a href="https://github.com/ch6vip/novel-sound/graphs/contributors">
-  <img src=".github/contributors.svg" alt="贡献者">
-</a>
-
-## Star History
-
-<a href="https://www.star-history.com/?repos=ch6vip%2Fnovel-sound&type=date&legend=top-left">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=ch6vip%2Fnovel-sound&type=date&theme=dark&legend=top-left">
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=ch6vip%2Fnovel-sound&type=date&legend=top-left">
-    <img src="https://api.star-history.com/chart?repos=ch6vip%2Fnovel-sound&type=date&legend=top-left" alt="什锦铺 Star History">
-  </picture>
-</a>
-
-## 致谢与许可
-
-感谢 [Wenku8 界面项目](assets/licenses/wenku8/PORTING.md)与 [LINUX DO](https://linux.do/) 社区。
-
-项目采用 [GPL-3.0](LICENSE) 开源协议，Copyright © 2026 ch6vip。
-
-在线内容来自第三方，版权归各自权利人。本项目与内容提供方无隶属关系，不托管作品，不绕过付费或访问权限。
-
-书架、进度和缓存保存在设备上。如开启 AI 校对或云端同步，相关内容会发送到你选择的服务，使用前请阅读应用内说明。
+沿用上游：**GPL-3.0**。本分支的修改同样以 GPL-3.0 发布。
+上游 README 原文保留在 [README_UPSTREAM.md](README_UPSTREAM.md)。
