@@ -372,7 +372,12 @@ impl UpstreamClient {
     pub async fn v5_playback(&self, base: &str, body: &[u8]) -> Result<Vec<u8>, ClientError> {
         let mut last_err = None;
 
-        for _ in 0..self.max_retries {
+        // A zero-length body is upstream's silent rejection: the signature was
+        // accepted but this device is burned. Rotating devices is cheap, so the
+        // playback path gets extra attempts on top of the generic retry count.
+        let attempts = self.max_retries + 2;
+
+        for _ in 0..attempts {
             let dev = self
                 .pool
                 .get()
@@ -384,16 +389,28 @@ impl UpstreamClient {
             } else {
                 dev.cdid.as_str()
             };
+            // The identity has to describe the same client the request headers
+            // claim, otherwise upstream accepts the signature but answers with
+            // an empty body. These values mirror `video_detail_url()`.
             let identity = crate::sign::v5::V5Identity {
                 device_id: &dev.device_id,
                 install_id: &dev.install_id,
                 cdid,
+                version_name: "7.1.3.32",
+                os_version: "16",
+                device_type: "25053RT47C",
+                channel: "update_64",
             };
             match self
                 .do_resp_with_transient_retry(
                     || {
-                        let signed = crate::sign::v5::sign_playback_v5(base, body, &identity)
-                            .map_err(ClientError::Other)?;
+                        let signed = crate::sign::v5::sign_playback_v5(
+                            base,
+                            &identity,
+                            Some(body),
+                            crate::timeutil::now_millis(),
+                        )
+                        .ok_or_else(|| ClientError::Other("V5 playback signing failed".to_string()))?;
                         Ok(UpstreamRequest {
                             method: Some("POST".to_string()),
                             url: signed.url,
@@ -408,7 +425,23 @@ impl UpstreamClient {
                 )
                 .await
             {
-                Ok((data, _)) => return Ok(data),
+                Ok((data, _)) => {
+                    if !data.is_empty() {
+                        return Ok(data);
+                    }
+                    let err = ClientError::DeviceFailed(
+                        "v5 playback returned an empty body".to_string(),
+                    );
+                    last_err = Some(err.clone());
+                    if super::budget::remaining().is_some_and(|left| left.is_zero()) {
+                        return Err(err);
+                    }
+                    let _ = self.pool.replace_failed(&dev.device_id).await;
+                    if !super::budget::retry_pause(Duration::from_millis(100)).await {
+                        return Err(err);
+                    }
+                    continue;
+                }
                 Err(err) => {
                     last_err = Some(err.clone());
                     if err.is_device_failed() {
@@ -428,7 +461,7 @@ impl UpstreamClient {
 
         Err(ClientError::Other(format!(
             "v5 playback failed after {} device attempts: {}",
-            self.max_retries,
+            attempts,
             last_err.map(|error| error.to_string()).unwrap_or_default()
         )))
     }

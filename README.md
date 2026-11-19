@@ -68,16 +68,38 @@
 请求体要 gzip 压缩、并带一整套 `x-gorgon` / `x-argus` / `x-ladon` / `x-helios` / `x-medusa` /
 `x-khronos` 签名头，旧接口对任何客户端都返回 `200` + 空 body。
 
-本分支**采用上游的修复**：作者在 [PR #425](https://github.com/ch6vip/novel-sound/pull/425)
-（V5 播放签名）里实现了完整签名，我们的代码就是他的实现——
-`rust/src/sign/v5.rs`（`V5Identity` / `sign_playback_v5`）+ `rust/src/upstream/client.rs`
-的 `v5_playback()`（「Calls the v5 playback door with the exact gzip bytes it signs」）+
-`rust/src/endpoints/video.rs` 的 `v5_playback_body()` / `fetch_v5_video_model()`，
+V5 的实现经历过两代：
 
+1. **第一代（11-16）**：上游作者在 [PR #425](https://github.com/ch6vip/novel-sound/pull/425) 里
+   实现了 V5 签名，本分支当时直接采用（`rust/src/sign/v5.rs` 的 `V5Identity` /
+   `sign_playback_v5`，配合 `rust/src/upstream/client.rs` 的 `v5_playback()` 与
+   `rust/src/endpoints/video.rs` 的 `v5_playback_body()` / `fetch_v5_video_model()`）。
+2. **第二代（11-19，当前）**：上游再次换算法，表现依旧是 `200` + 空 body。
+   本轮签名实现来自 **[hongguoTV](https://github.com/openhongguo/hongguoTV) 的逆向成果**
+   （其 `Signer.kt` / `AesV3.kt` / `V5Constants.kt`），经
+   [baggioyfan/fqapp](https://github.com/baggioyfan/fqapp) 移植为 Rust 后并入本分支：
+   `rust/src/sign/v5.rs`（`branch_v5` / `helios_v5` / `medusa_v5`）、`rust/src/sign/v5_tables.rs`。
 
-> 说明：V5 之前我们曾用「保留 `x-medusa` 请求头 + 多挂 `content_type`」的临时方案绕过空 body。
-> 那套做法**已废弃并删除**，现在 `x-medusa` 只是 V5 签名头集合里的一项，由 `sign/v5.rs` 生成，
-> 不再靠它单独触发播放。
+> **许可说明**：hongguoTV 与本项目同为 **GPL-3.0**，V5 签名部分按同协议继续分发。
+> `v5.rs` 里原作者用 `tests/data/*` 做向量校验的用例，本仓库没有对应数据文件，
+> 已收进默认关闭的 feature `v5_reference_vectors`，不影响运行逻辑。
+
+两代算法的差异（常量没变，是算法与熵源换代）：
+
+| 项 | 第一代 | 第二代（当前） |
+| --- | --- | --- |
+| branch 判定 | `branch_iv(&sm3(query), &md5(body), ts) & 15 == 12` | `branch_v5(&query, body, ts) != 0` |
+| x-helios | `helios(ts, entropy.helios)` | `helios_v5(ts, rand_u32())` |
+| x-medusa | `medusa(query_hash, body_md5, ts, …)` | `medusa_v5(&url, body, ts, who)` |
+
+另外两件事一起修了：
+
+- **空 body 视为「设备废号」**：`v5_playback()` 现在遇到 0 字节响应会
+  `ClientError::DeviceFailed` → `pool.replace_failed()` → 立刻换下一台设备重试，
+  尝试次数从 3 提到 5；V5 身份字段也改成与请求头一致的真实值
+  （`7.1.3.32` / Android 16 / `25053RT47C` / `update_64`），此前用的是上游默认值，容易被判空。
+- **顶栏预览静默重试**：`inline_video_playback.dart` 的 `_fail()` 遇到
+  `service` / `unavailable` / `timeout` 时不再立刻画错误卡，700ms 后自动重试一次。
 
 另外两处仍然是我们自己补的兼容逻辑：
 

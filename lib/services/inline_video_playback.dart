@@ -172,6 +172,12 @@ class InlineVideoPlayback {
 
   NativePlayer? _player;
   MediaItem? _active;
+  /// Last activation, kept so a transient upstream failure can be retried
+  /// silently instead of painting an error over the feed card.
+  MediaItem? _lastActivation;
+  int? _lastActivationIndex;
+  Duration? _lastActivationPosition;
+  bool _transientRetried = false;
   List<Chapter> _episodes = const [];
   int? _activeIndex;
   int _generation = 0;
@@ -297,6 +303,13 @@ class InlineVideoPlayback {
     }
     final generation = ++_generation;
     final contentId = series.seriesId ?? series.id;
+    final previousContentId = _lastActivation == null
+        ? null
+        : (_lastActivation!.seriesId ?? _lastActivation!.id);
+    if (previousContentId != contentId) _transientRetried = false;
+    _lastActivation = series;
+    _lastActivationIndex = startEpisodeIndex;
+    _lastActivationPosition = startPosition;
     final tab = series.kind == 'manju' ? '漫剧' : '短剧';
     // The drama being left still belongs to the old player, so its progress is
     // captured before the state below is replaced. Writes queue behind each
@@ -1060,6 +1073,31 @@ class InlineVideoPlayback {
 
   Future<void> _fail(Object failure) async {
     if (_disposed) return;
+    // A burned device answers with an empty body, which surfaces as the
+    // service-level issue. Retrying costs one request and keeps the feed from
+    // showing a failure card for something the next device would serve.
+    final issue = PlaybackIssue.fromError(failure);
+    final retryable =
+        issue == PlaybackIssue.service ||
+        issue == PlaybackIssue.unavailable ||
+        issue == PlaybackIssue.timeout;
+    if (retryable && !_transientRetried && _lastActivation != null) {
+      _transientRetried = true;
+      ++_generation;
+      AppLog.w('drama', '内联短剧取流失败，静默重试一次', error: failure);
+      firstFrame.value = false;
+      playing.value = false;
+      await _teardown();
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+      if (_disposed) return;
+      final series = _lastActivation!;
+      await activate(
+        series,
+        startEpisodeIndex: _lastActivationIndex,
+        startPosition: _lastActivationPosition,
+      );
+      return;
+    }
     ++_generation;
     AppLog.e('drama', '内联短剧取流或播放失败', error: failure);
     error.value = failure is NativePlaybackException
