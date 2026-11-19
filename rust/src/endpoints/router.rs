@@ -38,6 +38,14 @@ pub fn match_rest_path(path: &str, query: &Params) -> Option<RouteMatch> {
             api: "category_front",
             params: query.clone(),
         }),
+        "book-feed" => Some(RouteMatch {
+            api: "book_feed",
+            params: query.clone(),
+        }),
+        "category-feed" => Some(RouteMatch {
+            api: "category_feed",
+            params: query.clone(),
+        }),
         "audio" => match_audio(tail, query),
         "authors" => match_authors(tail, query),
         "manga" => match_manga(tail, query),
@@ -485,12 +493,6 @@ fn match_recommend(parts: &[&str], q: &Params) -> Option<RouteMatch> {
     if parts[0] == "series-feed" {
         return Some(RouteMatch {
             api: "series_feed",
-            params: q.clone(),
-        });
-    }
-    if parts[0] == "ugc-stories" {
-        return Some(RouteMatch {
-            api: "ugc_stories",
             params: q.clone(),
         });
     }

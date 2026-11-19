@@ -234,14 +234,34 @@ class _ClassicHomeTabBarState extends State<ClassicHomeTabBar> {
             builder: (context, constraints) {
               final viewport = constraints.maxWidth;
               _viewport = viewport;
-              final gap = _gapWidth(viewport, _widths);
+              // 分类删到 4 项之后不再挤在中间：每格平分整行（减去两侧留白
+              // 与标签间距），文字居中、选中块/下划线照旧按格子中心滑。
+              final evenWidths =
+                  categories.length <= 4 && viewport.isFinite
+                  ? List<double>.filled(
+                      categories.length,
+                      math.max(
+                        0.0,
+                        (viewport -
+                                2 * ClassicHomeTabBar.sidePadding -
+                                (categories.length - 1) *
+                                    ClassicHomeTabBar.tabSpacing) /
+                            categories.length,
+                      ),
+                    )
+                  : null;
+              final widths = evenWidths ?? _widths;
+              if (evenWidths != null) _widths = evenWidths;
+              final gap = evenWidths != null
+                  ? ClassicHomeTabBar.tabSpacing
+                  : _gapWidth(viewport, _widths);
               _gap = gap;
               if (_centresGap != gap ||
-                  _centres.length != _widths.length ||
-                  !identical(_centresWidths, _widths)) {
+                  _centres.length != widths.length ||
+                  !identical(_centresWidths, widths)) {
                 _centresGap = gap;
-                _centresWidths = _widths;
-                _centres = SlidingTabStrip.centres(_widths, gap: gap);
+                _centresWidths = widths;
+                _centres = SlidingTabStrip.centres(widths, gap: gap);
               }
               // 不足一屏时整组居中（PiliPlus 的 TabAlignment.center）：把滚动
               // 子节点撑到至少「视口 − 两侧 padding」宽再居中；超出一屏时
@@ -272,7 +292,7 @@ class _ClassicHomeTabBarState extends State<ClassicHomeTabBar> {
                               if (index > 0) SizedBox(width: gap),
                               _tab(
                                 index,
-                                _widths[index],
+                                widths[index],
                                 rowHeight,
                                 duration,
                                 palette,

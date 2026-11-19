@@ -12,6 +12,8 @@ import '../models/audio_extra.dart';
 import '../models/media_item.dart';
 import '../services/episode_source_cache.dart';
 import '../services/haptic_preferences.dart';
+import '../services/ios_audio_session.dart';
+import '../services/ios_platform.dart';
 import '../services/native_player.dart';
 import '../services/playback_format.dart';
 import '../services/playback_gesture_levels.dart';
@@ -160,6 +162,9 @@ class VideoPlayerChrome extends StatefulWidget {
   final int commentCount;
   final VoidCallback? onComments;
 
+  /// 右栏（评论按钮上方）额外的一枚按钮，目前用来放短剧收藏。
+  final Widget? railExtra;
+
   /// 热评信息行（官方 `InfoPanelHotCommentView`）：列表来自 `hotOf` 的本地筛选，
   /// 为空时整条不出现。
   final List<PlayletComment> hotComments;
@@ -273,6 +278,7 @@ class VideoPlayerChrome extends StatefulWidget {
     this.landscapeLockEnabled = false,
     this.commentCount = 0,
     this.onComments,
+    this.railExtra,
     this.onSeeked,
     this.hotComments = const [],
     this.onHotCommentTap,
@@ -321,6 +327,16 @@ class _VideoPlayerChromeState extends State<VideoPlayerChrome>
   /// yet; back-to-back taps accumulate onto it instead of reusing the last
   /// acknowledged position.
   Duration? _pendingSeek;
+
+  /// iOS 媒体会话（锁屏卡片 / 控制中心 / 耳机键）。非 iOS 或未接入时为 null，
+  /// 所有推送都变成空操作。
+  ///
+  /// 听书页自己会接一套 [IosAudioSession]；两处按「谁最后接入谁接管」协作，
+  /// 播放页只在自己仍是接管方时清理，避免把听书的会话一起关掉。
+  late final void Function(String action, int? positionMs) _iosMediaHandler =
+      _handleIosMediaAction;
+  bool _iosMediaArmed = false;
+  DateTime? _lastIosMediaPush;
   late final _timeline = Listenable.merge([_position, _seekValue]);
   StreamSubscription<Duration>? _positionSubscription;
   StreamSubscription<bool>? _playWhenReadySubscription;
@@ -616,6 +632,7 @@ class _VideoPlayerChromeState extends State<VideoPlayerChrome>
     _pages = PageController(initialPage: widget.currentIndex);
     _panel.addListener(_panelChanged);
     _listenToPosition();
+    _attachIosMediaSession();
     WidgetsBinding.instance.addObserver(this);
     _appActive = playbackAppIsActive(WidgetsBinding.instance.lifecycleState);
     _lockController =
@@ -741,10 +758,18 @@ class _VideoPlayerChromeState extends State<VideoPlayerChrome>
       if ((!widget.playing && !_seeking) || !widget.enabled) _visible = true;
       _scheduleHide();
     }
+    if (oldWidget.playing != widget.playing ||
+        oldWidget.currentIndex != widget.currentIndex ||
+        oldWidget.duration != widget.duration ||
+        oldWidget.player != widget.player ||
+        oldWidget.episodes.length != widget.episodes.length) {
+      _publishIosMedia(force: true);
+    }
   }
 
   @override
   void dispose() {
+    _detachIosMediaSession();
     WidgetsBinding.instance.removeObserver(this);
     _hideTimer?.cancel();
     _doubleTapGuard?.cancel();
@@ -781,6 +806,99 @@ class _VideoPlayerChromeState extends State<VideoPlayerChrome>
     super.dispose();
   }
 
+  // MARK: - iOS 媒体会话（锁屏 / 控制中心 / 耳机键）
+
+  /// 接管 `MPRemoteCommandCenter`。
+  ///
+  /// 听书链路（`AudioPlaybackController`）也接同一套桥；播放页进来时直接
+  /// 覆盖 `onAction`，离开时只在「自己还是接管方」的情况下清理，
+  /// 因此从播放页进听书页不会因为播放页 dispose 而丢掉会话。
+  void _attachIosMediaSession() {
+    if (!isIOSDevice) return;
+    IosAudioSession.install();
+    IosAudioSession.onAction = _iosMediaHandler;
+    _iosMediaArmed = true;
+    _publishIosMedia(force: true);
+  }
+
+  void _detachIosMediaSession() {
+    if (!_iosMediaArmed) return;
+    _iosMediaArmed = false;
+    if (!identical(IosAudioSession.onAction, _iosMediaHandler)) return;
+    IosAudioSession.onAction = null;
+    unawaited(IosAudioSession.stop());
+  }
+
+  /// 耳机键 / 锁屏 / 控制中心的动作。
+  ///
+  /// 不能复用 [_togglePlayback]：那条路径带 `_appActive` 等前台态门禁，
+  /// 而在锁屏或后台正是需要它工作的时候。
+  void _handleIosMediaAction(String action, int? positionMs) {
+    final player = widget.player;
+    if (player == null || !_ready) return;
+    switch (action) {
+      case 'play':
+        unawaited(_control((p) => p.play()));
+      case 'pause':
+        unawaited(_control((p) => p.pause()));
+      case 'playPause':
+        final pause = _playbackRequested;
+        unawaited(_control((p) => pause ? p.pause() : p.play()));
+      case 'next':
+        unawaited(_selectEpisode(widget.currentIndex + 1));
+      case 'prev':
+        unawaited(_selectEpisode(widget.currentIndex - 1));
+      case 'seek':
+        if (positionMs == null) return;
+        final total = widget.duration.inMilliseconds;
+        final clamped = total > 0 ? positionMs.clamp(0, total) : positionMs;
+        final target = Duration(milliseconds: clamped);
+        _position.value = target;
+        widget.onSeeked?.call(target);
+        unawaited(_control((p) => p.seek(target)));
+      case 'stop':
+        unawaited(_control((p) => p.pause()));
+      default:
+        return;
+    }
+    _publishIosMedia(force: true);
+  }
+
+  /// 把当前进度与剧集信息推给系统。原生每收到一次就重写锁屏卡片；
+  /// 进度流是 200ms 一条，这里节流到 1 秒（`force` 用于状态切换）。
+  void _publishIosMedia({bool force = false}) {
+    if (!_iosMediaArmed || !isIOSDevice) return;
+    final now = DateTime.now();
+    final previous = _lastIosMediaPush;
+    if (!force &&
+        previous != null &&
+        now.difference(previous) < const Duration(seconds: 1)) {
+      return;
+    }
+    _lastIosMediaPush = now;
+    final index = widget.currentIndex;
+    final episodes = widget.episodes;
+    final episode = index >= 0 && index < episodes.length
+        ? episodes[index].title
+        : widget.episodeLabel;
+    unawaited(
+      IosAudioSession.update(
+        title: widget.seriesTitle.isNotEmpty
+            ? widget.seriesTitle
+            : widget.title,
+        episode: episode,
+        cover: widget.seriesCover,
+        playing: widget.playing,
+        positionMs: _position.value.inMilliseconds,
+        durationMs: widget.duration.inMilliseconds,
+        rate: _rate,
+        hasPrev: index > 0,
+        hasNext: index + 1 < episodes.length,
+        mode: 'video',
+      ),
+    );
+  }
+
   void _listenToPosition() {
     unawaited(_positionSubscription?.cancel());
     unawaited(_playWhenReadySubscription?.cancel());
@@ -792,6 +910,7 @@ class _VideoPlayerChromeState extends State<VideoPlayerChrome>
     _positionSubscription = player?.positionStream.listen((position) {
       if (mounted && identical(widget.player, player)) {
         _position.value = position;
+        _publishIosMedia();
       }
     });
     _playWhenReadySubscription = player?.playWhenReadyStream.listen((_) {
@@ -3900,11 +4019,20 @@ class _VideoPlayerChromeState extends State<VideoPlayerChrome>
 
   /// 追剧、点赞、分享移除后，右侧只保留已接入的评论入口。
   Widget _rightBar(EdgeInsets insets) {
-    if (widget.onComments == null) return const SizedBox.shrink();
+    final railExtra = widget.railExtra;
+    if (widget.onComments == null && railExtra == null) {
+      return const SizedBox.shrink();
+    }
     return Positioned(
       right: insets.right + 12,
       bottom: insets.bottom + 172,
-      child: _commentButton(),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (railExtra != null) ...[railExtra, const SizedBox(height: 14)],
+          if (widget.onComments != null) _commentButton(),
+        ],
+      ),
     );
   }
 
@@ -3984,8 +4112,20 @@ class _VideoPlayerChromeState extends State<VideoPlayerChrome>
         ),
         if (controls && !_hideFullscreenPill)
           LayoutId(id: _PortraitSlot.fullscreen, child: _fullscreenPill()),
-        if (controls && widget.onComments != null)
-          LayoutId(id: _PortraitSlot.comments, child: _commentButton()),
+        if (controls && (widget.onComments != null || widget.railExtra != null))
+          LayoutId(
+            id: _PortraitSlot.comments,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (widget.railExtra != null) ...[
+                  widget.railExtra!,
+                  const SizedBox(height: 14),
+                ],
+                if (widget.onComments != null) _commentButton(),
+              ],
+            ),
+          ),
       ],
     ),
   );
@@ -4978,9 +5118,22 @@ class _PortraitControlsLayout extends MultiChildLayoutDelegate {
     final maximumTop = math.max(minimumTop, informationTop - actionHeight - 16);
     final top = math.min(math.max(videoBottom + 20, minimumTop), maximumTop);
     if (hasPill) {
+      // 用户要求（m10007）：再往上 1cm。系数是相对可视高度的位移量，
+      // 1cm ≈ 0.068（iPhone 17 Pro Max 上 956dp 高、1cm ≈ 65dp）。
+      // 0.058 − 0.068 = −0.010：落在「评论」文字中心上方约 10dp 处。
+      // 下界用「选集条上沿」兜住，掉进底栏里就没法点了。
+      final commentLabelCenter = comments.height > 0
+          ? top - 4 + comments.height - 8
+          : maximumTop + 8;
+      final catalogTop = size.height - insets.bottom - 8 - 48;
+      final desiredTop =
+          commentLabelCenter + size.height * -0.010 - pill.height / 2;
       positionChild(
         _PortraitSlot.fullscreen,
-        Offset(insets.left + (width - pill.width) / 2, top),
+        Offset(
+          insets.left + (width - pill.width) / 2,
+          math.max(0.0, math.min(desiredTop, catalogTop - pill.height - 8)),
+        ),
       );
     }
     if (hasComments) {

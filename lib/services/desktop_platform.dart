@@ -260,6 +260,17 @@ class DesktopPlatform with WindowListener {
           );
           return {'playerId': id};
         }
+        if (method == 'reopen') {
+          // 换章时复用同一个 mpv 实例：后台新建播放器会在音频输出初始化
+          // 上卡死（真机日志里 create 之后再没有 "opened paused"）。
+          final id = (args['playerId'] as num?)?.toInt();
+          final host = id == null ? null : _players[id];
+          if (host == null) return null;
+          unawaited(
+            host.reopen(args['cdnUrl'] as String, args['keyHex'] as String),
+          );
+          return {'playerId': id};
+        }
         if (method == 'setKeepScreenOn') {
           await _setAwake(player: args['on'] == true);
           return null;
@@ -981,6 +992,35 @@ class _DesktopPlayer {
   final ready = Completer<void>();
   DesktopMedia? media;
   bool disposed = false;
+  /// 在**同一个** mpv 实例上换源，不重建播放器（后台换章必须走这条路）。
+  Future<void> reopen(String url, String key) async {
+    try {
+      media?.close();
+      media = null;
+      var playbackUrl = url;
+      if (key.isNotEmpty) {
+        final session = await DesktopMedia.open(url, key);
+        if (disposed) {
+          session.close();
+          return;
+        }
+        media = session;
+        playbackUrl = session.url;
+      }
+      if (disposed) return;
+      await player.open(Media(playbackUrl), play: false);
+      AppLog.d('desktop-player', 'id=$id reopened paused');
+      if (disposed) return;
+      _size();
+      emit({'playerId': id, 'type': 'reopened', 'value': id});
+    } catch (error) {
+      AppLog.d('desktop-player', 'id=$id reopen failed $error');
+      if (!disposed) {
+        emit({'playerId': id, 'type': 'error', 'message': '媒体播放失败，请重试或切换清晰度'});
+      }
+    }
+  }
+
   Future<void> open(String url, String key) async {
     ready.future.ignore();
     try {

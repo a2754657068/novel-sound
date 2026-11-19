@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -18,6 +19,7 @@ import '../services/shell_visibility.dart';
 import '../services/home_continue_preferences.dart';
 import '../services/home_page_affinity.dart';
 import '../services/library_store.dart';
+import '../services/reading_preference.dart';
 import '../widgets/home/classic_home_feed_states.dart';
 import '../widgets/home/classic_home_skeleton.dart';
 import '../widgets/home/classic_home_stream_footer.dart';
@@ -33,7 +35,6 @@ import '../widgets/home/home_reading_row.dart';
 import '../widgets/home/home_shelf.dart';
 import '../widgets/home/home_skeleton.dart';
 import '../widgets/home/home_tab_bar.dart';
-import '../widgets/home/ugc_story_feed.dart';
 import '../widgets/tab_swipe_area.dart';
 import 'cached_book_reader.dart';
 import 'category_page.dart';
@@ -173,12 +174,16 @@ class _HomePageState extends ConsumerState<HomePage> {
   /// page load. `cellsForView()` mints a new list whenever a page appends, so
   /// the identity check below is also exactly the invalidation signal.
   List<Widget>? _blocksBody;
+
+  /// 随机推荐段的洗牌种子：同一批数据保持固定顺序，避免重建时跳动。
+  final int _bookRandomSeed = DateTime.now().microsecondsSinceEpoch;
   List<HomeCell>? _blocksCells;
   int? _blocksTabIndex;
   String? _blocksLeadKey;
   double? _blocksWidth;
   double? _blocksTitleScale;
   double? _blocksMetaScale;
+  int? _blocksFeedRevision;
 
   /// Last logged render shape; keeps the diagnostic to one line per change.
   String? _loggedShape;
@@ -187,9 +192,29 @@ class _HomePageState extends ConsumerState<HomePage> {
   /// 进度换书，所以页面自己订阅盒子的变更。
   Listenable? _historyListenable;
 
+  /// 首页小说推荐流：完结 10 / 连载 10 / 更多（分页采样）。
+  final List<MediaItem> _feedFinished = [];
+  final List<MediaItem> _feedSerial = [];
+  final List<MediaItem> _feedMore = [];
+  final Set<String> _feedIds = {};
+  bool _feedLoading = false;
+  bool _feedLoaded = false;
+  bool _feedMoreLoading = false;
+  bool _feedHasMore = true;
+  String? _feedError;
+  int _feedPage = 0;
+  /// 每次冷启动换一个种子；下拉刷新也会换。同一会话内保持稳定，
+  /// 「加载更多」才不会把刚看过的书又推一遍。
+  int _feedSeedBase = 0;
+  /// 推荐数据版本号：进 `_blockBodySlivers` 的缓存键，否则追加的数据画不出来。
+  int _feedRevision = 0;
+
   @override
   void initState() {
     super.initState();
+    _feedSeedBase = Random().nextInt(1 << 22);
+    // 和首页数据并行拉：别等首屏画完再要推荐，否则第一眼只能是兜底网格。
+    unawaited(_ensureBookFeed());
     final store = LibraryStore.instance;
     if (store.isInitialized) {
       _historyListenable = store.historyListenable
@@ -285,7 +310,6 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   void _onScroll() {
     if (!mounted || !_visible) return;
-    if (_isUgcTab(ref.read(homeProvider).tabIndex)) return;
     if (!_scroll.hasClients) {
       final state = ref.read(homeProvider);
       if (state.error == null && _visibleItems(state).isEmpty) _maybeLoadMore();
@@ -299,7 +323,6 @@ class _HomePageState extends ConsumerState<HomePage> {
   void _maybeLoadMore() {
     if (!mounted || !_visible || _loadMoreTimer != null) return;
     final state = ref.read(homeProvider);
-    if (_isUgcTab(state.tabIndex)) return;
     if (state.isLoading || state.isLoadMore || !state.hasMore) return;
     _loadMoreTimer = Timer(const Duration(milliseconds: 500), () {
       _loadMoreTimer = null;
@@ -321,8 +344,12 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   /// 下拉与冷启动错误里的「重试」都走手动刷新：手动刷新会跳过续接快照，
   /// 用服务端的第一页整体替换列表（官方 `SaasClientReqType.Refresh`）。
-  Future<void> _refresh() =>
-      ref.read(homeProvider.notifier).load(manualRefresh: true);
+  Future<void> _refresh() async {
+    _resetFeed();
+    if (mounted) setState(() {});
+    unawaited(_ensureBookFeed());
+    await ref.read(homeProvider.notifier).load(manualRefresh: true);
+  }
 
   /// 追加失败后 footer 的重试：`loadMore` 失败会把 `hasMore` 置 false，必须
   /// 让 notifier 先把游标恢复，否则重试会被「已经没有下一页」挡住。
@@ -332,9 +359,6 @@ class _HomePageState extends ConsumerState<HomePage> {
   /// 当前分类的种类：「推荐」与「全部」都会落到 `book`。
   String _kindOf(HomeState state) =>
       ref.read(homeProvider.notifier).identityOf(state.tabIndex).kind;
-
-  bool _isUgcTab(int tabIndex) =>
-      ref.read(homeProvider.notifier).identityOf(tabIndex).kind == 'ugc';
 
   List<MediaItem> _visibleItems(HomeState state) {
     final kind = _kindOf(state);
@@ -358,12 +382,25 @@ class _HomePageState extends ConsumerState<HomePage> {
     return owner == state.tabIndex ? cells : const [];
   }
 
-  /// 顶栏分类：固定用本地七分类（推荐/小说/短剧/漫剧/漫画/听书/短篇）。
+  /// 顶栏分类：固定用本地六分类（推荐/小说/短剧/漫剧/漫画/听书）。
   ///
   /// 2026-10-24 用户决定回退服务端 11 项方案——服务端表没有「短剧/漫剧」，
   /// 跨媒介入口只能本地给；点击身份由 `homeProvider` 的 `usesLocalTabs`
   /// 本地表驱动，与这里的下标一一对应。
   List<HomeCategory> _categoriesOf(HomeState state) => homeCategories;
+
+  /// 频道下标 → 顶栏位置。找不到（比如从底部短剧入口深链过来）就停在「推荐」。
+  int _barIndexFor(int tabIndex) {
+    final index = homeCategories.indexWhere(
+      (category) => category.index == tabIndex,
+    );
+    return index < 0 ? 0 : index;
+  }
+
+  /// 顶栏位置 → 频道下标。
+  int _tabIndexOf(int barIndex) => barIndex >= 0 && barIndex < homeCategories.length
+      ? homeCategories[barIndex].index
+      : 0;
 
   @override
   Widget build(BuildContext context) {
@@ -408,8 +445,8 @@ class _HomePageState extends ConsumerState<HomePage> {
                 ValueListenableBuilder<double>(
                   valueListenable: _tabProgress,
                   builder: (context, progress, _) => HomeTabBar(
-                    selectedIndex: state.tabIndex,
-                    onSelect: _selectTab,
+                    selectedIndex: _barIndexFor(state.tabIndex),
+                    onSelect: (bar) => _selectTab(_tabIndexOf(bar)),
                     categories: categories,
                     progress: progress,
                   ),
@@ -427,9 +464,9 @@ class _HomePageState extends ConsumerState<HomePage> {
                       });
                       return ClipRect(
                         child: TabSwipeArea.pages(
-                          index: state.tabIndex,
+                          index: _barIndexFor(state.tabIndex),
                           count: categories.length,
-                          onSelect: _selectTab,
+                          onSelect: (bar) => _selectTab(_tabIndexOf(bar)),
                           // The header lives outside the swipe area, so it
                           // cannot see the drag offset; this is how the
                           // underline learns to follow the finger.
@@ -438,8 +475,11 @@ class _HomePageState extends ConsumerState<HomePage> {
                               _tabProgress.value = value;
                             }
                           },
-                          pageBuilder: (context, target) =>
-                              _buildTabPage(target, gridWidth, textScale),
+                          pageBuilder: (context, target) => _buildTabPage(
+                            _tabIndexOf(target),
+                            gridWidth,
+                            textScale,
+                          ),
                         ),
                       );
                     },
@@ -474,6 +514,9 @@ class _HomePageState extends ConsumerState<HomePage> {
       state.hasMore,
       state.error,
       _localRevision,
+      // 推荐流是异步后到的：不带版本号的话，首帧建出来的竖向兜底网格会被
+      // 一直复用，变成「冷启动竖着排、滑到底才变横滑」。
+      _feedRevision,
       gridWidth,
       textScale,
     );
@@ -488,18 +531,6 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   Widget _buildTabPage(int target, double gridWidth, double textScale) {
     final palette = HomePalette.of(context);
-    final kind = ref.read(homeProvider.notifier).identityOf(target).kind;
-    if (kind == 'ugc') {
-      return ValueListenableBuilder<int?>(
-        valueListenable: shellVisibleTab,
-        builder: (context, shellTab, _) => UgcStoryFeed(
-          scrollController: _scrollFor(target),
-          active:
-              (shellTab == null || shellTab == widget.shellIndex) &&
-              ref.read(homeProvider).tabIndex == target,
-        ),
-      );
-    }
     final saved = _tabStates[target];
     // 只记每个分类「第一次被建出来」的时刻：和 stall 行对齐就能看出
     // 那一下停顿是不是花在建页上。
@@ -568,10 +599,11 @@ class _HomePageState extends ConsumerState<HomePage> {
     _logShape(state, blockBody != null);
 
     if (blockBody != null) {
+      final feedActive = _feedFinished.isNotEmpty || _feedSerial.isNotEmpty;
       return [
         if (now != null) _continueRow(now),
         ...blockBody,
-        _footer(state),
+        if (!feedActive) _footer(state),
         _bottomSpacer(context),
       ];
     }
@@ -678,7 +710,8 @@ class _HomePageState extends ConsumerState<HomePage> {
         _blocksLeadKey == leadKey &&
         _blocksWidth == gridWidth &&
         _blocksTitleScale == titleScale &&
-        _blocksMetaScale == metaScale) {
+        _blocksMetaScale == metaScale &&
+        _blocksFeedRevision == _feedRevision) {
       return cached;
     }
     _blocksCells = cells;
@@ -687,6 +720,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     _blocksWidth = gridWidth;
     _blocksTitleScale = titleScale;
     _blocksMetaScale = metaScale;
+    _blocksFeedRevision = _feedRevision;
 
     final slivers = <Widget>[];
     final entries = <MediaItem>[];
@@ -721,14 +755,19 @@ class _HomePageState extends ConsumerState<HomePage> {
       // 只有网格前面还有别的块时才加分区头：短剧/漫剧/漫画/听书这些分类
       // 没有排行榜，网格就是第一段，再顶着分类名（「短剧」）当标题，等于把
       // 顶栏已经选中的标签又念了一遍。推荐页（tab 0）保留「为你推荐」。
-      if (slivers.isNotEmpty || state.tabIndex == 0) {
-        slivers.add(SliverToBoxAdapter(child: _gridHeader(state)));
+      if (kind == 'book') {
+        // 小说改成三段：完结推荐 / 连载推荐 / 随机推荐（前面的排行榜原样保留）。
+        slivers.addAll(_bookSectionSlivers(entries, gridWidth, slivers.isEmpty));
       } else {
-        // 没有分区头时网格直接顶在标签条下面：选中背景块的底边会和第一行
-        // 封面贴在一起。用一段留白替掉被去掉的分区头位置（与短剧页同一档）。
-        slivers.add(const SliverToBoxAdapter(child: SizedBox(height: 16)));
+        if (slivers.isNotEmpty || state.tabIndex == 0) {
+          slivers.add(SliverToBoxAdapter(child: _gridHeader(state)));
+        } else {
+          // 没有分区头时网格直接顶在标签条下面：选中背景块的底边会和第一行
+          // 封面贴在一起。用一段留白替掉被去掉的分区头位置（与短剧页同一档）。
+          slivers.add(const SliverToBoxAdapter(child: SizedBox(height: 16)));
+        }
+        slivers.add(_gridBody(entries, gridWidth));
       }
-      slivers.add(_gridBody(entries, gridWidth));
       rendered = true;
     }
     if (!rendered) {
@@ -791,6 +830,345 @@ class _HomePageState extends ConsumerState<HomePage> {
       sliver,
     ];
   }
+
+  int get _feedSeed => _feedSeedBase;
+
+  void _resetFeed() {
+    _feedFinished.clear();
+    _feedSerial.clear();
+    _feedMore.clear();
+    _feedIds.clear();
+    _feedPage = 0;
+    _feedHasMore = true;
+    _feedLoaded = false;
+    _feedMoreLoading = false;
+    _feedError = null;
+    _feedSeedBase = Random().nextInt(1 << 22);
+    _feedRevision++;
+  }
+
+  Future<List<MediaItem>> _fetchFeed(
+    String status,
+    int seed,
+    int page, {
+    bool usePreference = false,
+  }) async {
+    // 只有「更多推荐」吃阅读偏好；完结/连载两栏保持中性，否则首页会越用越窄。
+    final prefer = usePreference
+        ? ReadingPreference.encode(ReadingPreference.topTags())
+        : '';
+    final payload = await ApiClient.instance.bookFeed(
+      status: status,
+      limit: 10,
+      exclude: _feedIds.join(','),
+      seed: seed,
+      page: page,
+      prefer: prefer,
+    );
+    final raw = payload['items'];
+    final items = <MediaItem>[];
+    if (raw is List) {
+      for (final entry in raw) {
+        if (entry is! Map) continue;
+        try {
+          items.add(MediaItem.fromRaw(Map<String, dynamic>.from(entry)));
+        } catch (_) {}
+      }
+    }
+    return items;
+  }
+
+  /// 三块推荐都从服务端采样来：完结 10 本、连载 10 本，然后「更多推荐」。
+  /// 三块共用一个 `_feedIds` 做跨栏去重。
+  Future<void> _ensureBookFeed() async {
+    if (_feedLoaded || _feedLoading) return;
+    _feedLoading = true;
+    if (mounted) setState(() => _feedError = null);
+    try {
+      final seed = _feedSeed;
+      // 完结和连载互不相干，并发取，省一轮往返（首次约 2s，之后命中分类缓存更快）。
+      final both = await Future.wait([
+        _fetchFeed('finished', seed, 0),
+        _fetchFeed('serial', seed + 1, 0),
+      ]);
+      final finished = both[0];
+      for (final item in finished) {
+        _feedIds.add(item.id);
+      }
+      _feedFinished
+        ..clear()
+        ..addAll(finished);
+
+      var serial = both[1].where((item) => !_feedIds.contains(item.id)).toList();
+      for (final item in serial) {
+        _feedIds.add(item.id);
+      }
+      // 并发取的时候没带对方的 exclude，撞车了补一次。
+      if (serial.length < 8) {
+        final refill = await _fetchFeed('serial', seed + 1, 1);
+        for (final item in refill) {
+          if (_feedIds.add(item.id)) serial.add(item);
+        }
+      }
+      _feedSerial
+        ..clear()
+        ..addAll(serial.take(10));
+
+      final more = await _fetchFeed('any', seed + 2, 0, usePreference: true);
+      for (final item in more) {
+        _feedIds.add(item.id);
+      }
+      _feedMore
+        ..clear()
+        ..addAll(more);
+      _feedHasMore = more.isNotEmpty;
+      _feedLoaded = true;
+      _feedRevision++;
+    } catch (error) {
+      _feedError = error is ApiException ? error.message : '推荐加载失败';
+    } finally {
+      _feedLoading = false;
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _loadMoreFeed() async {
+    if (_feedMoreLoading || !_feedHasMore) return;
+    _feedMoreLoading = true;
+    if (mounted) setState(() {});
+    try {
+      _feedPage++;
+      final more = await _fetchFeed(
+        'any',
+        _feedSeed + 2,
+        _feedPage,
+        usePreference: true,
+      );
+      for (final item in more) {
+        _feedIds.add(item.id);
+      }
+      _feedMore.addAll(more);
+      if (more.isEmpty) _feedHasMore = false;
+      _feedRevision++;
+    } catch (_) {
+      _feedPage--;
+    } finally {
+      _feedMoreLoading = false;
+      if (mounted) setState(() {});
+    }
+  }
+
+  /// 横滑行：完结 / 连载各 10 本，排版与排行榜一致。
+  Widget _feedRail(List<MediaItem> items) {
+    final classic = AppStyleTokens.of(context).isClassic;
+    final tokens = AppStyleTokens.of(context);
+    const cardWidth = 104.0;
+    return SliverToBoxAdapter(
+      child: SizedBox(
+        height: 218,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: homeGutter),
+          itemCount: items.length,
+          separatorBuilder: (context, index) => const SizedBox(width: 12),
+          itemBuilder: (context, index) {
+            final item = items[index];
+            return SizedBox(
+              width: cardWidth,
+              child: HomeMediaCard(
+                item: item,
+                coverWidth: cardWidth,
+                radius: classic ? 12.0 : tokens.coverRadius,
+                titleSize: classic ? 15 : homeCardTitleSize,
+                archiveCode: classic ? null : homeFileCode(item),
+                onTap: () => _openItem(item),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  /// 横滑骨架：尺寸和真实封面卡对齐，数据到了原地替换，不会跳版。
+  Widget _feedRailSkeleton() {
+    final tokens = AppStyleTokens.of(context);
+    final base = Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.06);
+    return SliverToBoxAdapter(
+      child: SizedBox(
+        height: 218,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          physics: const NeverScrollableScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: homeGutter),
+          itemCount: 4,
+          separatorBuilder: (context, index) => const SizedBox(width: 12),
+          itemBuilder: (context, index) => SizedBox(
+            width: 104,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AspectRatio(
+                  aspectRatio: 3 / 4,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: base,
+                      borderRadius: BorderRadius.circular(
+                        tokens.isClassic ? 12 : tokens.coverRadius,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Container(height: 12, width: 84, color: base),
+                const SizedBox(height: 6),
+                Container(height: 10, width: 60, color: base),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 小说三段推荐：完结 / 连载 / 随机。排行榜等自定义块由调用方先塞进 slivers。
+  List<Widget> _bookSectionSlivers(
+    List<MediaItem> entries,
+    double gridWidth,
+    bool isFirstBlock,
+  ) {
+    if (!_feedLoaded && !_feedLoading) {
+      unawaited(_ensureBookFeed());
+    }
+    final finished = <MediaItem>[];
+    final serial = <MediaItem>[];
+    final others = <MediaItem>[];
+    for (final item in entries) {
+      switch (item.creationStatus) {
+        case 0:
+          finished.add(item);
+        case 1:
+          serial.add(item);
+        default:
+          others.add(item);
+      }
+    }
+    if (others.length > 1) {
+      final random = Random(_bookRandomSeed);
+      for (var i = others.length - 1; i > 0; i--) {
+        final j = random.nextInt(i + 1);
+        final tmp = others[i];
+        others[i] = others[j];
+        others[j] = tmp;
+      }
+    }
+
+    final slivers = <Widget>[];
+    void addSection(String code, String title, List<MediaItem> items) {
+      if (items.isEmpty) return;
+      slivers.add(SliverToBoxAdapter(child: _sectionHeader(code, title)));
+      slivers.add(_gridBody(items, gridWidth));
+    }
+
+    // 服务端推荐流可用时优先生效：完结/连载各 10 本横滑，后面接「更多推荐」。
+    if (_feedFinished.isNotEmpty || _feedSerial.isNotEmpty) {
+      if (_feedFinished.isNotEmpty) {
+        slivers.add(
+          SliverToBoxAdapter(
+            child: _sectionHeader('01 / FOR YOU', '完结推荐'),
+          ),
+        );
+        slivers.add(_feedRail(_feedFinished));
+      }
+      if (_feedSerial.isNotEmpty) {
+        slivers.add(
+          SliverToBoxAdapter(
+            child: _sectionHeader('02 / FOR YOU', '连载推荐'),
+          ),
+        );
+        slivers.add(_feedRail(_feedSerial));
+      }
+      if (_feedMore.isNotEmpty) {
+        slivers.add(
+          SliverToBoxAdapter(
+            child: _sectionHeader('03 / FOR YOU', '更多推荐'),
+          ),
+        );
+        slivers.add(_gridBody(_feedMore, gridWidth));
+        slivers.add(
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(homeGutter, 8, homeGutter, 20),
+              child: Center(
+                child: _feedHasMore
+                    ? TextButton(
+                        key: const ValueKey('home-feed-more'),
+                        onPressed: _feedMoreLoading ? null : _loadMoreFeed,
+                        child: Text(
+                          _feedMoreLoading ? '正在加载…' : '加载更多推荐',
+                        ),
+                      )
+                    : Text(
+                        '没有更多了',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+              ),
+            ),
+          ),
+        );
+      }
+      return slivers;
+    }
+
+    // 推荐还没到：画骨架，不画竖向兜底网格。冷启动第一眼必须是横向。
+    if (!_feedLoaded && _feedError == null) {
+      slivers.add(
+        SliverToBoxAdapter(child: _sectionHeader('01 / FOR YOU', '完结推荐')),
+      );
+      slivers.add(_feedRailSkeleton());
+      slivers.add(
+        SliverToBoxAdapter(child: _sectionHeader('02 / FOR YOU', '连载推荐')),
+      );
+      slivers.add(_feedRailSkeleton());
+      return slivers;
+    }
+
+    if (_feedError != null && _feedFinished.isEmpty && _feedSerial.isEmpty) {
+      slivers.add(
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(homeGutter, 0, homeGutter, 8),
+            child: Text(_feedError!, style: Theme.of(context).textTheme.bodySmall),
+          ),
+        ),
+      );
+    }
+
+    if (finished.isEmpty && serial.isEmpty) {
+      // 上游没给完结状态时退回单一网格，别让首页整段空掉。
+      slivers.add(
+        SliverToBoxAdapter(
+          child: isFirstBlock
+              ? _sectionHeader('01 / FOR YOU', '为你推荐')
+              : _sectionHeader('01 / FOR YOU', '随机推荐'),
+        ),
+      );
+      slivers.add(_gridBody(others.isEmpty ? entries : others, gridWidth));
+      return slivers;
+    }
+    addSection('01 / FOR YOU', '完结推荐', finished);
+    addSection('02 / FOR YOU', '连载推荐', serial);
+    addSection('03 / FOR YOU', '随机推荐', others);
+    if (slivers.isEmpty) {
+      slivers.add(const SliverToBoxAdapter(child: SizedBox(height: 16)));
+    }
+    return slivers;
+  }
+
+  Widget _sectionHeader(String code, String title) =>
+      AppStyleTokens.of(context).isClassic
+      ? HomeSectionHeader(title: title)
+      : HomeSectionLabel(code: code, title: title);
 
   Widget _gridHeader(HomeState state) => AppStyleTokens.of(context).isClassic
       ? HomeSectionHeader(title: _gridTitle(state))

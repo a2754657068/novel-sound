@@ -856,7 +856,7 @@ float computeShapeMask(float shapeDistPx) {
 // =====================================================
 // Main
 // =====================================================
-vec4 renderMetaballGlass() {
+void main() {
     vec2 fragPx   = FlutterFragCoord().xy + fragOrigin();
     float invResY = 1.0 / u_resolution.y;
     vec2 uvNorm   = fragPx * invResY;
@@ -950,7 +950,7 @@ vec4 renderMetaballGlass() {
         rimWrap
     );
 
-    return overlayPremul(base, borderPremul);
+    frag_color = overlayPremul(base, borderPremul);
 #else
     if (zoneMask < 0.5) {
         // Outside the distortion band — straight magnified sample + border.
@@ -969,7 +969,8 @@ vec4 renderMetaballGlass() {
             rimWrap
         );
 
-        return overlayPremul(base, borderPremul);
+        frag_color = overlayPremul(base, borderPremul);
+        return;
     }
 
     float zoneT = 1.0 - clamp(distAbsPx / max(zoneLimit, EPS), 0.0, 1.0);
@@ -997,11 +998,6 @@ vec4 renderMetaballGlass() {
         rimWrap
     );
 
-    return overlayPremul(base, borderPremul);
+    frag_color = overlayPremul(base, borderPremul);
 #endif
-    return vec4(0.0);
-}
-
-void main() {
-    frag_color = renderMetaballGlass();
 }

@@ -11,6 +11,8 @@ pub mod audio_text;
 pub mod author;
 pub mod base;
 pub mod book;
+pub mod book_feed;
+pub mod category;
 pub mod comments;
 pub mod content;
 pub mod content_util;
@@ -176,6 +178,8 @@ pub mod server {
 
     pub fn register_all(s: &mut Server) {
         search::register(s);
+        category::register(s);
+        book_feed::register(s);
         shuqi::register(s);
         home::register(s);
         book::register(s);

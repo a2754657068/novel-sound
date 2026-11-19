@@ -37,7 +37,8 @@ class PlayletFullscreenPill extends StatelessWidget {
           vertical: shortSeries ? 5 : 8,
         ),
         decoration: BoxDecoration(
-          color: const Color(0xB3262626),
+          // 竖屏浮在画面上，底衬太实会像一块补丁：降到 40% 不透明度。
+          color: const Color(0x66262626),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Row(

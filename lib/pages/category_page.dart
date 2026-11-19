@@ -8,6 +8,7 @@ import '../services/user_facing_error.dart';
 import '../widgets/category/category_dim_rail.dart';
 import '../widgets/home/home_design.dart';
 import '../widgets/home/home_feed_states.dart';
+import 'category_detail_page.dart';
 import 'search_page.dart';
 
 /// 官方分类页（`BookCategoryActivity`，7.0.9.32 实测形态）：
@@ -206,6 +207,16 @@ class _CategoryPageState extends State<CategoryPage> {
         });
   }
 
+  CategoryTile? _tileNamed(String? name) {
+    if (name == null || name.isEmpty) return null;
+    final front = _front;
+    if (front == null) return null;
+    for (final tile in front.tiles) {
+      if (tile.name == name) return tile;
+    }
+    return null;
+  }
+
   void _toggle(int index) {
     setState(() {
       if (!_expanded.remove(index)) _expanded.add(index);
@@ -213,6 +224,22 @@ class _CategoryPageState extends State<CategoryPage> {
   }
 
   void _openSearch({String? query, String? tag}) {
+    // 点分类标签现在进分类二级页（可按完结状态/字数/类型筛选），而不是把
+    // 标签当关键词丢进搜索。搜书仍然用顶部的搜索入口。
+    final tile = _tileNamed(tag);
+    if (query == null && tile != null && tile.id.isNotEmpty) {
+      final gender = _tabValue == 1 ? 1 : 0;
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => CategoryDetailPage(
+            categoryId: tile.id,
+            name: tile.name,
+            gender: gender,
+          ),
+        ),
+      );
+      return;
+    }
     final category = switch (_tabValue) {
       3 => SearchCategory.audio,
       5 => SearchCategory.manga,

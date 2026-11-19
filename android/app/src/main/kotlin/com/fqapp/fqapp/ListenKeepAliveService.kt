@@ -62,6 +62,8 @@ class ListenKeepAliveService : Service() {
     }
 
     private var currentEpisode: String = ""
+    private var currentBookId: String? = null
+    private var currentChapterId: String? = null
     private var isPlaying: Boolean = true
     private var hasPrev: Boolean = true
     private var hasNext: Boolean = true
@@ -146,6 +148,8 @@ class ListenKeepAliveService : Service() {
             ?: getString(R.string.listen_notification_title)
         val episode = intent?.getStringExtra(EXTRA_EPISODE)
             ?: currentEpisode
+        val bookId = intent?.getStringExtra(EXTRA_BOOK_ID) ?: currentBookId
+        val chapterId = intent?.getStringExtra(EXTRA_CHAPTER_ID) ?: currentChapterId
         val coverUrl = intent?.getStringExtra(EXTRA_COVER_URL) ?: currentCoverUrl
         val playing = intent?.getBooleanExtra(EXTRA_PLAYING, isPlaying) ?: isPlaying
         val prev = intent?.getBooleanExtra(EXTRA_HAS_PREV, hasPrev) ?: hasPrev
@@ -156,6 +160,8 @@ class ListenKeepAliveService : Service() {
 
         currentTitle = title
         currentEpisode = episode
+        currentBookId = bookId
+        currentChapterId = chapterId
         currentCoverUrl = coverUrl
         isPlaying = playing
         hasPrev = prev
@@ -337,10 +343,17 @@ class ListenKeepAliveService : Service() {
         }
     }
 
-    /** 点击通知卡片 / 系统媒体卡片都拉起主界面。 */
+    /**
+     * 点击通知卡片 / 系统媒体卡片都拉起主界面，并把正在播放的书与章节带回去，
+     * 这样 MainActivity 能让 App 直接落到那一集，而不是停在首页。
+     */
     private fun contentIntent(): PendingIntent? {
         val launchIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_BOOK_ID, currentBookId ?: "")
+            putExtra(EXTRA_CHAPTER_ID, currentChapterId ?: "")
+            putExtra(EXTRA_TITLE, currentTitle)
+            putExtra(EXTRA_COVER_URL, currentCoverUrl ?: "")
         } ?: return null
         return PendingIntent.getActivity(
             this,
@@ -433,6 +446,8 @@ class ListenKeepAliveService : Service() {
 
         const val EXTRA_TITLE = "title"
         const val EXTRA_EPISODE = "episode"
+        const val EXTRA_BOOK_ID = "bookId"
+        const val EXTRA_CHAPTER_ID = "chapterId"
         const val EXTRA_PLAYING = "playing"
         const val EXTRA_HAS_PREV = "hasPrev"
         const val EXTRA_HAS_NEXT = "hasNext"

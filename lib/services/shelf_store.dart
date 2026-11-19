@@ -122,7 +122,8 @@ class ShelfStore {
     return value is Map;
   }
 
-  bool containsItem(MediaItem item) => _openBox?.get(keyOf(item)) is Map;
+  bool containsItem(MediaItem item) =>
+      _openBox?.containsKey(keyOf(item)) ?? false;
 
   /// Newest first. Callers that need the official ordering (置顶 → 最近阅读)
   /// sort further; this is only the storage order.
@@ -152,7 +153,7 @@ class ShelfStore {
     final box = _openBox;
     if (box == null) return false;
     final key = keyOf(item);
-    if (box.get(key) is Map) {
+    if (box.containsKey(key)) {
       await box.delete(key);
       _revision.value++;
       return false;
@@ -208,7 +209,7 @@ class ShelfStore {
     if (box == null) throw StateError('书架尚未初始化');
     final missing = {
       for (final record in records)
-        if (box.get(keyOf(record.item)) is! Map)
+        if (!box.containsKey(keyOf(record.item)))
           keyOf(record.item): _recordOf(record.item, record.addedAt),
     };
     if (missing.isEmpty) {
@@ -291,34 +292,6 @@ class ShelfStore {
       _revision.value++;
     }
     return changed;
-  }
-
-  /// One in-memory Hive batch: a user toggle after this starts wins naturally.
-  /// Null placeholders hide removed entries without an await/delete race.
-  Future<bool> applySyncedRecords({
-    required List<ShelfRecord> incoming,
-    required bool Function(List<ShelfRecord>) acceptsCurrent,
-  }) async {
-    final box = _openBox;
-    if (box == null) throw StateError('书架尚未初始化');
-    final current = records();
-    if (!acceptsCurrent(current)) return false;
-    final writes = <String, dynamic>{
-      for (final record in incoming)
-        if (record.item.source == ShelfIdentity.fanqie)
-          keyOf(record.item): _recordOf(record.item, record.addedAt),
-    };
-    for (final record in current) {
-      if (record.item.source != ShelfIdentity.fanqie ||
-          (record.item.seriesId ?? record.item.id).startsWith('local_')) {
-        continue;
-      }
-      writes.putIfAbsent(keyOf(record.item), () => null);
-    }
-    await box.putAll(writes);
-    await box.flush();
-    _revision.value++;
-    return true;
   }
 
   static Map<String, dynamic> _recordOf(MediaItem item, DateTime addedAt) => {

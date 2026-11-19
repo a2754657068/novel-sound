@@ -468,10 +468,7 @@ class _ReaderBookPanelState extends State<ReaderBookPanel> {
         ),
         if (tags.isNotEmpty)
           Padding(
-            // These tags are read-only labels: drop the Material 48dp tap
-            // target (it added silent 8dp bands above and below) and keep
-            // only the breathing room the title and abstract need.
-            padding: const EdgeInsets.only(top: 10),
+            padding: const EdgeInsets.symmetric(vertical: 12),
             child: Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -481,7 +478,6 @@ class _ReaderBookPanelState extends State<ReaderBookPanel> {
                     label: Text(tag, style: const TextStyle(fontSize: 12)),
                     backgroundColor: preset.fieldColor,
                     side: BorderSide.none,
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
               ],
             ),

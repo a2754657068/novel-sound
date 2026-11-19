@@ -45,6 +45,7 @@ import '../widgets/player/story_player_panel.dart';
 import '../widgets/player/player_feedback.dart';
 import '../widgets/player/player_split_panel.dart';
 import '../widgets/player/player_toast.dart';
+import '../widgets/series_favorite_button.dart';
 import '../widgets/video_player_chrome.dart';
 
 part 'player_page_preload.dart';
@@ -1803,6 +1804,14 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       onError: (error) => _fail(error, _loadGeneration),
       commentCount: _commentCount,
       onComments: widget.shortSeries ? _openComments : null,
+      railExtra: widget.shortSeries && widget.bookId.isNotEmpty
+          ? SeriesFavoriteButton(
+              seriesId: widget.bookId,
+              title: _seriesTitle.isEmpty ? widget.title : _seriesTitle,
+              cover: _seriesCover,
+              episodeLabel: _episodeLabel,
+            )
+          : null,
       hotComments: _hotComments,
       onHotCommentTap: widget.shortSeries ? _openHotComment : null,
       seriesTitle: _seriesTitle,

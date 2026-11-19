@@ -1,3 +1,4 @@
+import '../widgets/series_favorite_button.dart';
 import '../widgets/video_player_chrome.dart';
 import '../services/desktop_platform.dart';
 import '../services/ios_platform.dart';
@@ -2114,6 +2115,12 @@ class _DramaPageState extends ConsumerState<DramaPage>
                   onOpenSeriesDetail: () => _openSeriesDetail(item),
                   onComments: () =>
                       PlayletCommentPanel.show(context, seriesId: item.id),
+                  railExtra: SeriesFavoriteButton(
+                    seriesId: item.id,
+                    title: item.title,
+                    cover: item.cover,
+                    episodeLabel: item.ep,
+                  ),
                   onOpenOfflineCache: _inline.episodes.isEmpty
                       ? null
                       : () => unawaited(_openFeedDownloadSheet()),
@@ -3768,24 +3775,29 @@ class _InfoPanelState extends State<_InfoPanel> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (widget.onFullscreen != null) ...[
-          Center(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _EpisodePill(item: item, onTap: widget.onFullscreen!),
-                if (widget.onQuickCatalog != null) ...[
-                  const SizedBox(width: 8),
-                  _QuickCatalogButton(onTap: widget.onQuickCatalog!),
-                ],
-                if (widget.playback != null && widget.onLandscape != null) ...[
-                  const SizedBox(width: 8),
-                  _FullscreenRoundButton(
-                    playback: widget.playback!,
-                    onTap: widget.onLandscape!,
-                  ),
-                ],
+          // 这一行原来整排居中，正压在画面中间（全屏钮尤其挡脸）。改成
+          // 通栏两端对齐：左侧「观看全集」胶囊按可用宽度收缩，右侧固定放
+          // 快速选集与全屏钮——用户要求的「全屏在右下角、长条向左缩」。
+          Row(
+            children: [
+              Flexible(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: _EpisodePill(item: item, onTap: widget.onFullscreen!),
+                ),
+              ),
+              if (widget.onQuickCatalog != null) ...[
+                const SizedBox(width: 8),
+                _QuickCatalogButton(onTap: widget.onQuickCatalog!),
               ],
-            ),
+              if (widget.playback != null && widget.onLandscape != null) ...[
+                const SizedBox(width: 8),
+                _FullscreenRoundButton(
+                  playback: widget.playback!,
+                  onTap: widget.onLandscape!,
+                ),
+              ],
+            ],
           ),
           const SizedBox(height: 12),
         ],
@@ -3955,13 +3967,17 @@ class _EpisodePill extends StatelessWidget {
           children: [
             const Icon(LucideIcons.play, size: 12, color: Colors.white),
             const SizedBox(width: 6),
-            Text(
-              label,
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-                letterSpacing: 0.2,
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                  letterSpacing: 0.2,
+                ),
               ),
             ),
           ],

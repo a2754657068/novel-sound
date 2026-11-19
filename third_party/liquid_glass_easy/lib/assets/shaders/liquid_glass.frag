@@ -264,7 +264,7 @@ float computeShapeMask(float shapeDistPx) {
 // =====================================================
 // Main entry
 // =====================================================
-vec4 renderLiquidGlass() {
+void main() {
     // ===============================
     // Fragment coordinate setup
     // ===============================
@@ -300,7 +300,8 @@ vec4 renderLiquidGlass() {
         - vec2(u_lensWidth, u_lensHeight) * 0.5)
         - vec2(u_lensWidth, u_lensHeight) * 0.5;
     if (any(greaterThan(outputDistance, vec2(outputGuard)))) {
-        return vec4(0.0);
+        frag_color = vec4(0.0);
+        return;
     }
 
     float invResY = 1.0 / u_resolution.y;
@@ -410,7 +411,7 @@ vec4 renderLiquidGlass() {
         );
     }
     vec3 preTintCol;
-    return finalSample(samplePx, shapeMask, 0.0, xformed, preTintCol);
+    frag_color = finalSample(samplePx, shapeMask, 0.0, xformed, preTintCol);
 #elif defined(LIQUID_GLASS_DESKTOP)
     // Outside the band: the straight magnified sample, no dispersion. One sample and
     // one border call serve both sides, so each is compiled once.
@@ -463,7 +464,7 @@ vec4 renderLiquidGlass() {
     // ===============================
     // Output composite
     // ===============================
-    return overlayPremul(base, borderPremul);
+    frag_color = overlayPremul(base, borderPremul);
 #else
     if (zoneMask < 0.5) {
         // Outside distortion zone
@@ -483,7 +484,8 @@ vec4 renderLiquidGlass() {
             u_shapeAaPx
         );
 
-        return overlayPremul(base, borderPremul);
+        frag_color = overlayPremul(base, borderPremul);
+        return;
     }
 
     // ===============================
@@ -527,11 +529,6 @@ vec4 renderLiquidGlass() {
     // ===============================
     // Output composite
     // ===============================
-    return overlayPremul(base, borderPremul);
+    frag_color = overlayPremul(base, borderPremul);
 #endif
-    return vec4(0.0);
-}
-
-void main() {
-    frag_color = renderLiquidGlass();
 }

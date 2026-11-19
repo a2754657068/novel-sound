@@ -578,6 +578,15 @@ class NativePlayerPlugin internal constructor(
                 val intent = Intent(context, ListenKeepAliveService::class.java).apply {
                     putExtra(ListenKeepAliveService.EXTRA_TITLE, call.argument<String>("title"))
                     putExtra(ListenKeepAliveService.EXTRA_EPISODE, call.argument<String>("episode"))
+                    // 点击通知要回到正在听的那一章，书 id 与章节 id 必须一路带到服务。
+                    putExtra(
+                        ListenKeepAliveService.EXTRA_BOOK_ID,
+                        call.argument<String>("bookId")
+                    )
+                    putExtra(
+                        ListenKeepAliveService.EXTRA_CHAPTER_ID,
+                        call.argument<String>("chapterId")
+                    )
                     // 通知大图与媒体卡封面用当前作品封面（issue #123）。空串时
                     // 服务退回应用图标。
                     putExtra(

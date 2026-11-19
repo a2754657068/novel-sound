@@ -16,8 +16,9 @@ class ReaderFollowPoll {
 
   static const interval = Duration(milliseconds: 100);
 
-  /// Follow ticks per periodic progress save (10Hz ⇒ 2s), independent of scroll
-  /// activity and its 500ms save debounce.
+  /// Follow ticks per periodic progress save (10Hz ⇒ 2s). While following, the
+  /// page is jumped programmatically on every tick, so the scroll controller's
+  /// 500ms save debounce never fires; the poll supplies its own cadence.
   static const saveEvery = 20;
 
   final void Function() tick;

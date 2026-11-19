@@ -63,16 +63,11 @@ class WebDavRemote {
 /// Conditional PUT prevents one device from silently replacing another's edit.
 /// Redirects are deliberately not followed with the Authorization header.
 class WebDavClient {
-  WebDavClient(this.config, {http.Client? client, this.forSyncMetadata = false})
+  WebDavClient(this.config, {http.Client? client})
     : _client = client ?? http.Client();
   final WebDavConfig config;
   final http.Client _client;
-  final bool forSyncMetadata;
-  static const metadataName = 'fqapp-webdav-state.json';
   static const maxBytes = 20 * 1024 * 1024;
-  int get _limit => forSyncMetadata ? 64 * 1024 * 1024 : maxBytes;
-  Uri get _fileUri =>
-      forSyncMetadata ? config.fileUri.resolve(metadataName) : config.fileUri;
 
   Future<http.Response> _request(
     String method, {
@@ -80,7 +75,7 @@ class WebDavClient {
     Map<String, String> headers = const {},
     Uri? uri,
   }) async {
-    final request = http.Request(method, uri ?? _fileUri)
+    final request = http.Request(method, uri ?? config.fileUri)
       ..followRedirects = false
       ..headers.addAll({
         // Compression proxies can weaken ETags; conditional PUT needs the
@@ -94,13 +89,13 @@ class WebDavClient {
     try {
       return await (() async {
         final response = await _client.send(request);
-        if ((response.contentLength ?? 0) > _limit) {
-          throw const WebDavException('WebDAV 同步文件超过大小限制');
+        if ((response.contentLength ?? 0) > maxBytes) {
+          throw const WebDavException('同步文件超过 20 MB');
         }
         final body = BytesBuilder(copy: false);
         await for (final chunk in response.stream) {
-          if (body.length + chunk.length > _limit) {
-            throw const WebDavException('WebDAV 同步文件超过大小限制');
+          if (body.length + chunk.length > maxBytes) {
+            throw const WebDavException('同步文件超过 20 MB');
           }
           body.add(chunk);
         }
@@ -141,9 +136,7 @@ class WebDavClient {
 
   /// False means another device won this write; re-read and merge before retry.
   Future<bool> write(Uint8List bytes, String? etag) async {
-    if (bytes.length > _limit) {
-      throw const WebDavException('WebDAV 同步文件超过大小限制');
-    }
+    if (bytes.length > maxBytes) throw const WebDavException('同步文件超过 20 MB');
     var response = await _request(
       'PUT',
       bytes: bytes,

@@ -67,6 +67,11 @@ class NativePlayer {
   static const _methodTimeout = Duration(seconds: 10);
   static const _createTimeout = Duration(seconds: 25);
 
+  /// 换源（reopen）等待时长：mpv 解出媒体头通常 1–3 秒，后台给到 15 秒。
+  static const _reopenTimeout = Duration(seconds: 15);
+
+  Completer<void>? _reopenCompleter;
+
   /// The app's listening owner coordinates audio with video playback. The
   /// generation below cancels a pending play if another player pauses it.
   static Future<void> Function(NativePlayer)? beforePlay;
@@ -474,6 +479,29 @@ class NativePlayer {
     }
   }
 
+  /// 在现有播放器上换源（不重建）。后台换章只能这样走：新建 mpv 实例会在
+  /// 音频输出初始化上永久阻塞。返回时等待时长就绪，调用方可以立刻 play。
+  Future<void> reopen(String cdnUrl, String keyHex) async {
+    final playerId = _playerId;
+    if (_disposed || playerId == null) {
+      throw StateError('NativePlayer is not created');
+    }
+    // 换源期间旧 URL 可能先报一次错（本地代理端口已关），别让它留在状态里。
+    _lastError = null;
+    final completer = _reopenCompleter = Completer<void>();
+    await _channel.invokeMethod<void>('reopen', {
+      'playerId': playerId,
+      'cdnUrl': cdnUrl,
+      'keyHex': keyHex,
+    });
+    // 必须等原生真的换完源：mpv 换了 URL 之后才会解出新媒体的头，
+    // 此时 duration 才可信。直接看 duration 会读到上一章残留的值，
+    // 于是「还没换完就开始播」，mpv 去连已经关闭的本地端口，报
+    // `tcp: Connection refused` 然后卡住。
+    await completer.future.timeout(_reopenTimeout);
+    if (_disposed) throw StateError('NativePlayer was disposed');
+  }
+
   Future<void> play() => _setPlayWhenReady(true);
   Future<void> pause() => _setPlayWhenReady(false);
 
@@ -549,6 +577,9 @@ class NativePlayer {
   static Future<void> startListenForeground({
     required String title,
     required String episode,
+    // 安卓通知点击要能回到正在听的那一章，所以书 id 与章节 id 一起下发。
+    String bookId = '',
+    String chapterId = '',
     String coverUrl = '',
     bool playing = true,
     bool hasPrev = true,
@@ -592,6 +623,8 @@ class NativePlayer {
         },
         'title': title,
         'episode': episode,
+        'bookId': bookId,
+        'chapterId': chapterId,
         'coverUrl': coverUrl,
         'playing': playing,
         'hasPrev': hasPrev,
@@ -861,6 +894,11 @@ class NativePlayer {
             _createdCompleter.complete(value.toInt());
           }
         }
+      case 'reopened':
+        // 换源完成：mpv 已经解出新媒体的头，duration 也回来了。
+        final completer = _reopenCompleter;
+        _reopenCompleter = null;
+        if (completer != null && !completer.isCompleted) completer.complete();
       case 'textureChanged':
         final value = event['value'];
         if (value is num) {

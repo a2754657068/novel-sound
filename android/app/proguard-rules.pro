@@ -71,7 +71,3 @@
 # stack; EnclosingMethod/InnerClasses keep Kotlin lambdas and nested types
 # consistent in crash reports.
 -keepattributes Signature, InnerClasses, EnclosingMethod, *Annotation*
-
-# The SMB sync connection uses NTLM on Android. SMBJ also carries an optional
-# desktop GSS/Kerberos authenticator, whose JDK classes are unavailable here.
--dontwarn org.ietf.jgss.**

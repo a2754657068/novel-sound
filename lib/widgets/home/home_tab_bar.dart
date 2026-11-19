@@ -7,20 +7,23 @@ import 'home_design.dart';
 class HomeCategory {
   final String label;
 
-  const HomeCategory(this.label);
+  /// 这个标签在 `HomeNotifier.tabs` 里的下标。
+  ///
+  /// 顶栏不再和内部频道表一一对应（「短剧」「漫剧」已从顶栏移除，入口只留
+  /// 底部 dock），所以下标必须显式带出来，不能再拿顶栏位置当频道下标用。
+  final int index;
+
+  const HomeCategory(this.label, this.index);
 }
 
 const homeCategories = [
-  HomeCategory('推荐'),
-  HomeCategory('小说'),
-  HomeCategory('短剧'),
-  HomeCategory('漫剧'),
-  HomeCategory('漫画'),
-  HomeCategory('听书'),
-  HomeCategory('短篇'),
+  HomeCategory('推荐', 0),
+  HomeCategory('小说', 1),
+  HomeCategory('漫画', 4),
+  HomeCategory('听书', 5),
 ];
 
-/// 七个媒介分类固定在顶部；保留名称和下划线，不再重复分区的编号层级。
+/// 六个媒介分类固定在顶部；保留名称和下划线，不再重复分区的编号层级。
 class HomeTabBar extends StatelessWidget {
   static const double sidePadding = 16;
   static const double tabSpacing = 22;
@@ -65,23 +68,41 @@ class HomeTabBar extends StatelessWidget {
         color: palette.canvas,
         border: Border(bottom: BorderSide(color: palette.line, width: 1)),
       ),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: sidePadding),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            for (var index = 0; index < categories.length; index++) ...[
-              if (index > 0) const SizedBox(width: tabSpacing),
-              _tab(index, duration, palette),
-            ],
-          ],
-        ),
-      ),
+      // 分类少（现在删到 4 项）时不需要横向滚动，让每个标签平分整行宽度，
+      // 占满的那一段本身就是点击区，比挤在左边一坨好点。
+      child: categories.length <= 4
+          ? Padding(
+              padding: const EdgeInsets.symmetric(horizontal: sidePadding),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  for (var index = 0; index < categories.length; index++)
+                    Expanded(child: _tab(index, duration, palette, fill: true)),
+                ],
+              ),
+            )
+          : SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: sidePadding),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  for (var index = 0; index < categories.length; index++) ...[
+                    if (index > 0) const SizedBox(width: tabSpacing),
+                    _tab(index, duration, palette),
+                  ],
+                ],
+              ),
+            ),
     );
   }
 
-  Widget _tab(int index, Duration duration, HomePalette palette) {
+  Widget _tab(
+    int index,
+    Duration duration,
+    HomePalette palette, {
+    bool fill = false,
+  }) {
     final selected = index == selectedIndex;
     final category = categories[index];
     return Semantics(
@@ -90,35 +111,40 @@ class HomeTabBar extends StatelessWidget {
         key: ValueKey('home_category_$index'),
         onTap: () => onSelect(index),
         borderRadius: BorderRadius.zero,
-        // Stack follows the label width inside the horizontal scroll view.
-        child: Stack(
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: AnimatedDefaultTextStyle(
-                duration: duration,
-                curve: Curves.easeOutCubic,
-                style: TextStyle(
-                  fontSize: selected ? selectedSize : unselectedSize,
-                  height: 1.1,
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-                  color: selected ? palette.ink : palette.muted,
+        // 平分模式下由外层 Expanded 决定宽度，文字居中、下划线铺满这一格；
+        // 滚动模式保持原来的「宽度跟随文字」。
+        child: SizedBox(
+          width: fill ? double.infinity : null,
+          child: Stack(
+            alignment: fill ? Alignment.topCenter : AlignmentDirectional.topStart,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: AnimatedDefaultTextStyle(
+                  duration: duration,
+                  curve: Curves.easeOutCubic,
+                  style: TextStyle(
+                    fontSize: selected ? selectedSize : unselectedSize,
+                    height: 1.1,
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                    color: selected ? palette.ink : palette.muted,
+                  ),
+                  child: Text(category.label, maxLines: 1),
                 ),
-                child: Text(category.label, maxLines: 1),
               ),
-            ),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              height: 2,
-              child: AnimatedContainer(
-                duration: duration,
-                curve: Curves.easeOutCubic,
-                color: selected ? palette.mark : Colors.transparent,
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                height: 2,
+                child: AnimatedContainer(
+                  duration: duration,
+                  curve: Curves.easeOutCubic,
+                  color: selected ? palette.mark : Colors.transparent,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
