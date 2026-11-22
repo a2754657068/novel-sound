@@ -349,6 +349,18 @@ class DesktopPlatform with WindowListener {
           );
           return {'playerId': id};
         }
+        if (method == 'reopen') {
+          final id = args['playerId'];
+          final host = id is num ? _players[id.toInt()] : null;
+          if (host == null) {
+            // 播放器已经释放（比如用户先退了播放页）：交给上层回退到重建。
+            return {'reopened': false};
+          }
+          unawaited(
+            host.reopen(args['cdnUrl'] as String, args['keyHex'] as String),
+          );
+          return {'reopened': true};
+        }
         if (method == 'setKeepScreenOn') {
           await _setAwake(player: args['on'] == true);
           return null;
@@ -1171,6 +1183,42 @@ class _DesktopPlayer {
   final ready = Completer<void>();
   DesktopMedia? media;
   bool disposed = false;
+
+  /// 复用同一个 mpv 实例换源。
+  ///
+  /// 后台不能新建播放器（音频输出初始化会挂住），换章只能原地换源。完成信号
+  /// 由 ``reopened`` 事件给出：不能拿 `duration > 0` 判断，mpv 上残留上一章
+  /// 的时长会让我们提前起播、连到已关闭的本地代理端口。
+  Future<void> reopen(String url, String key) async {
+    try {
+      media?.close();
+      media = null;
+      var playbackUrl = url;
+      if (key.isNotEmpty) {
+        final session = await DesktopMedia.open(url, key);
+        if (disposed) {
+          session.close();
+          return;
+        }
+        media = session;
+        playbackUrl = session.url;
+      }
+      if (disposed) return;
+      await player.open(desktopPlaybackMedia(playbackUrl, null), play: false);
+      AppLog.d('desktop-player', 'id=$id reopened paused');
+      if (disposed) return;
+      emit({'playerId': id, 'type': 'reopened', 'value': id});
+      _size();
+    } catch (error) {
+      final value = desktopOpenFailure(id, error);
+      if (!disposed) {
+        emit({'playerId': id, 'type': 'error', 'value': value});
+      }
+      media?.close();
+      media = null;
+    }
+  }
+
   Future<void> open(String url, String key, {Object? startPositionMs}) async {
     ready.future.ignore();
     try {

@@ -259,6 +259,12 @@ void _onChapterFinished(
     return;
   }
   if (shouldAdvance && c._index + 1 < c._chapters.length) {
+    // 后台不能等倒计时：进程一挂起 Timer 就停，回来的时间不确定。直接换章，
+    // 且换章走复用播放器的那条路（见 _switchChapter）。
+    if (!c._appActive) {
+      unawaited(c._switchChapter(c._index + 1));
+      return;
+    }
     _beginAdvanceCountdown(c);
     return;
   }

@@ -638,6 +638,12 @@ final class AudioSessionBridge: NSObject {
           owner = nil
         }
         result(nil)
+      case "beginBackgroundWindow":
+        beginBackgroundWindow()
+        result(nil)
+      case "endBackgroundWindow":
+        endBackgroundWindow()
+        result(nil)
       default:
         result(FlutterMethodNotImplemented)
       }
@@ -648,6 +654,27 @@ final class AudioSessionBridge: NSObject {
     // 无声模拟器上还可能拖慢启动。第一次 update 会按 mode 配置并激活。
     registerCommands()
     observeInterruptions()
+  }
+
+  // MARK: - 后台执行窗口
+
+  private static var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+
+  /// 换章空档：音频停掉的这几十毫秒到几秒里进程可能已经被挂起，用系统给的
+  /// 后台额度把「建流 → 起播」这一段盖住。
+  private static func beginBackgroundWindow() {
+    endBackgroundWindow()
+    backgroundTask = UIApplication.shared.beginBackgroundTask(
+      withName: "fqapp-chapter-handover"
+    ) {
+      endBackgroundWindow()
+    }
+  }
+
+  private static func endBackgroundWindow() {
+    guard backgroundTask != .invalid else { return }
+    UIApplication.shared.endBackgroundTask(backgroundTask)
+    backgroundTask = .invalid
   }
 
   private static func matches(_ arguments: [String: Any]) -> Bool {

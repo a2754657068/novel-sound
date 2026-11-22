@@ -445,6 +445,9 @@ class NativePlayer {
 
   final _createdCompleter = Completer<int>();
 
+  /// 后台换章用：复用同一个原生播放器换源，见 [reopen]。
+  Completer<void>? _reopenCompleter;
+
   /// 起播位置（毫秒）：> 0 才下发；原生在 prepare() 前应用，不是装载后再 seek。
   Future<int> create(String cdnUrl, String keyHex, {int? startMs}) {
     if (_disposed) {
@@ -934,11 +937,40 @@ class NativePlayer {
     }
   }
 
+  /// 复用当前原生播放器换源（不销毁、不新建）。
+  ///
+  /// iOS 在音频停止后约 1 秒会挂起进程，而换章如果走 [create] 要先释放旧播放器、
+  /// 再新建 mpv：后台新建实例会卡在音频输出初始化（25 秒超时都不返回），换章
+  /// 永远走不完，锁屏/控制中心的媒体卡片随之被系统收回。后台改走这里，等原生
+  /// 回 ``reopened`` 事件再继续。
+  Future<void> reopen(String cdnUrl, String keyHex) async {
+    final playerId = _playerId;
+    if (_disposed || playerId == null) {
+      throw StateError('NativePlayer is not created');
+    }
+    _lastError = null;
+    final completer = _reopenCompleter = Completer<void>();
+    try {
+      await _channel.invokeMethod<void>('reopen', {
+        'playerId': playerId,
+        'cdnUrl': cdnUrl,
+        'keyHex': keyHex,
+      });
+      await completer.future.timeout(_createTimeout);
+    } finally {
+      if (identical(_reopenCompleter, completer)) _reopenCompleter = null;
+    }
+  }
+
   void _handleChannelError(Object error, StackTrace stackTrace) {
     if (_disposed) return;
     _lastError = error;
     if (!_createdCompleter.isCompleted) {
       _createdCompleter.completeError(error, stackTrace);
+    }
+    final reopen = _reopenCompleter;
+    if (reopen != null && !reopen.isCompleted) {
+      reopen.completeError(error, stackTrace);
     }
     if (!_errorCtrl.isClosed) _errorCtrl.add(error);
   }
@@ -955,6 +987,9 @@ class NativePlayer {
             _createdCompleter.complete(value.toInt());
           }
         }
+      case 'reopened':
+        final reopen = _reopenCompleter;
+        if (reopen != null && !reopen.isCompleted) reopen.complete();
       case 'textureChanged':
         final value = event['value'];
         if (value is num) {
@@ -991,6 +1026,10 @@ class NativePlayer {
         _lastError = error;
         if (!_createdCompleter.isCompleted) {
           _createdCompleter.completeError(error);
+        }
+        final reopen = _reopenCompleter;
+        if (reopen != null && !reopen.isCompleted) {
+          reopen.completeError(error);
         }
         if (!_errorCtrl.isClosed) _errorCtrl.add(error);
       case 'decoderInitialized':

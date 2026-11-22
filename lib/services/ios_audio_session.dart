@@ -63,6 +63,16 @@ class IosAudioSession {
     unawaited(_invoke('cancelInterruption', _identity));
   }
 
+  /// 换章时向系统申请一小段后台执行时间（约 30 秒）。
+  ///
+  /// 进程一旦因为音频停止被挂起，换章后面的建流/起播就全断在这里；这个窗口用来
+  /// 盖住换源那几百毫秒的静音空档。
+  static Future<void> beginBackgroundWindow() =>
+      _invoke('beginBackgroundWindow', _identity);
+
+  static Future<void> endBackgroundWindow() =>
+      _invoke('endBackgroundWindow', _identity);
+
   static Future<void> _invoke(
     String method,
     Map<String, dynamic> arguments,

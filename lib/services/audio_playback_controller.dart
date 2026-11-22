@@ -506,9 +506,9 @@ class _AudioPlaybackController extends ChangeNotifier
       case 'playPause':
         unawaited(_togglePlayback());
       case 'prev':
-        if (_index > 0) unawaited(_openChapter(_index - 1));
+        unawaited(_switchChapter(_index - 1));
       case 'next':
-        if (_index < _chapters.length - 1) unawaited(_openChapter(_index + 1));
+        unawaited(_switchChapter(_index + 1));
       case 'stop':
         if (onStop case final stop?) {
           stop();
@@ -807,6 +807,94 @@ class _AudioPlaybackController extends ChangeNotifier
       } else {
         await candidate?.dispose();
       }
+    }
+  }
+
+  /// 换章入口：前台正常重建播放器，后台复用同一个播放器原地换源。
+  ///
+  /// 后台重建会卡死——iOS 在音频停止后约 1 秒挂起进程，而新建 mpv 实例要等
+  /// 音频输出初始化，等不到就被挂起，换章永远走不完（真机日志里表现为
+  /// `dispose failed (TimeoutException)` 之后再也没有新的播放器起来）。
+  Future<void> _switchChapter(int target) async {
+    if (_closed || target < 0 || target >= _chapters.length) return;
+    if (target == _index) return;
+    final player = _player;
+    if (_appActive || player == null || !player.isCreated) {
+      await _openChapter(target);
+      return;
+    }
+    unawaited(IosAudioSession.beginBackgroundWindow());
+    try {
+      await _advanceInBackground(target);
+    } finally {
+      await IosAudioSession.endBackgroundWindow();
+    }
+  }
+
+  /// 后台换章：只有「取到音源 + 原地换源 + 起播」这一段，不重建播放器。
+  Future<void> _advanceInBackground(int target) async {
+    if (_closed || target < 0 || target >= _chapters.length) return;
+    final player = _player;
+    if (player == null || !player.isCreated) {
+      await _openChapter(target);
+      return;
+    }
+    final generation = ++_generation;
+    _cancelAdvanceCountdown(this);
+    _resetTrackRecovery(this);
+    _cancelTrackRequests();
+    ++_seekGeneration;
+    _saveTimer?.cancel();
+    _listenTime.stop();
+    unawaited(_persistProgress());
+    _update(() {
+      _index = target;
+      _loading = true;
+      _error = null;
+      _completed = false;
+      _position.value = Duration.zero;
+      _duration = Duration.zero;
+      _seekPreview.value = null;
+      _subtitles = SubtitleTrack.empty;
+      _subtitlesEstimated = false;
+      _timeTrack = AudioTimeTrack.empty;
+      _timeTrackReady = false;
+      _wantPlay =
+          _appActive || AudioPreferences.instance.backgroundPlayback.value;
+    });
+    _publishReadAlong();
+    _publishMoreState();
+    try {
+      final itemId = _chapters[target].itemId;
+      final source = await _loadSourceWithRetry(itemId);
+      if (!_current(generation)) return;
+      await player.reopen(source.url, source.keyHex);
+      if (!_current(generation, player)) return;
+      final duration = player.duration > Duration.zero
+          ? player.duration
+          : (source.duration ?? Duration.zero);
+      _activeIndex = target;
+      _toneId = source.toneId;
+      _update(() {
+        _duration = duration;
+        _position.value = Duration.zero;
+        _loading = false;
+      });
+      _publishReadAlong();
+      _publishMoreState();
+      await player.setRate(_rate);
+      if (!_current(generation, player)) return;
+      _syncForeground();
+      if (_wantPlay) await _play(player, generation);
+      if (!_current(generation, player)) return;
+      _saveTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+        if (!player.playing) return;
+        unawaited(_persistProgress());
+        _syncForeground();
+      });
+      _syncListenClock();
+    } catch (error) {
+      if (_current(generation)) _fail(error, generation);
     }
   }
 
