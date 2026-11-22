@@ -202,7 +202,8 @@ class SearchPage extends StatefulWidget {
 
 class _SearchPageState extends State<SearchPage> {
   static const _paginationThreshold = 480.0;
-  static const _categories = SearchCategory.values;
+  /// 烂番茄版只保留综合 / 小说 / 听书三个页签。
+  static const _categories = [SearchCategory.general, SearchCategory.book, SearchCategory.audio];
   static const _listViewPreference = 'search_list_view';
   static const _minimumScorePreference = 'search_minimum_score';
 
@@ -429,8 +430,13 @@ class _SearchPageState extends State<SearchPage> {
       (item.score != null && item.score! >= _minimumScore);
 
   /// 二次筛选：评分 + 分类标签 + 连载状态 + 字数。只作用于已加载的结果。
+  /// 烂番茄版只保留小说与听书：搜索结果里的短剧/漫剧/漫画条目直接丢弃。
+  static const _keptKinds = {'book', 'audio'};
+
   bool _matchesFilters(MediaItem item) =>
-      _matchesScore(item) && _filters.matches(item);
+      _keptKinds.contains(item.kind) &&
+      _matchesScore(item) &&
+      _filters.matches(item);
 
   /// 结果条目的来源限定身份。书旗和番茄各自有自己的 id 命名空间，不能只按
   /// id 或 kind 匹配。

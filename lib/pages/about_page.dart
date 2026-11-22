@@ -70,8 +70,9 @@ class AboutPage extends StatelessWidget {
           const _AboutHeading(),
           const SizedBox(height: 16),
           Text(
-            '什锦铺把小说、短剧、漫剧、漫画和听书聚到一起。'
-            '所有签名与解密都在你的手机本地完成，不依赖第三方服务。',
+            '烂番茄由什锦铺修改而来：保留了小说与听书，去掉了短剧、漫剧和漫画。'
+            '之所以去掉，是因为短剧取流所依赖的上游接口多次变更、短期内无法稳定，'
+            '这一部分功能暂时放弃。所有签名与解密都在你的手机本地完成，不依赖第三方服务。',
             style: theme.textTheme.bodyMedium?.copyWith(
               color: scheme.onSurfaceVariant,
               height: 1.7,
@@ -234,10 +235,10 @@ class _AboutInfoCard extends StatelessWidget {
             subtitle: 'GPL-3.0 与第三方组件许可',
             onTap: () => showLicensePage(
               context: context,
-              applicationName: '什锦铺',
+              applicationName: '烂番茄',
               applicationVersion: AboutPage.versionText,
               applicationLegalese:
-                  '什锦铺基于 GPL-3.0 协议开源，第三方组件遵循其各自的许可协议。'
+                  '烂番茄由什锦铺修改而来，同样基于 GPL-3.0 协议开源，第三方组件遵循其各自的许可协议。'
                   'Wenku8 Flutter 界面来源与许可文本见 assets/licenses/wenku8。',
             ),
           ),
@@ -408,7 +409,7 @@ class _AboutHeading extends StatelessWidget {
     return Column(
       children: [
         AppText(
-          '什锦铺',
+          '烂番茄',
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 22,

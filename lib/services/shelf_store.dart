@@ -140,7 +140,7 @@ class ShelfStore {
       final item = _itemFrom(raw, storageKey: key.toString());
       if (item == null) continue;
       records.add(
-        ShelfRecord(item: item, addedAt: _addedAt(raw) ?? DateTime(1970)),
+        ShelfRecord(item: item, addedAt: _addedAt(raw) ?? DateTime.fromMillisecondsSinceEpoch(0)),
       );
     }
     records.sort((a, b) => b.addedAt.compareTo(a.addedAt));

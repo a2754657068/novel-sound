@@ -331,7 +331,23 @@ class _HomePageState extends ConsumerState<HomePage> {
     ref.read(homeProvider.notifier).loadMore();
   }
 
+  /// 顶栏「分类」是一个伪频道：它不走上游 tab，只把分类页内嵌到这一格里。
+  static const int _categoryTabIndex = -1;
+
+  bool _categoryActive = false;
+
   void _selectTab(int index) {
+    if (index == _categoryTabIndex) {
+      if (!_categoryActive) {
+        _loadMoreTimer?.cancel();
+        _loadMoreTimer = null;
+        setState(() => _categoryActive = true);
+      }
+      return;
+    }
+    if (_categoryActive) {
+      setState(() => _categoryActive = false);
+    }
     if (index == ref.read(homeProvider).tabIndex) return;
     FrameStats.mark('selectTab $index');
     // 上一个分类的续页轮询不该跟着新分类继续跑。
@@ -391,6 +407,12 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   /// 频道下标 → 顶栏位置。找不到（比如从底部短剧入口深链过来）就停在「推荐」。
   int _barIndexFor(int tabIndex) {
+    if (_categoryActive) {
+      final categoryIndex = homeCategories.indexWhere(
+        (category) => category.index == _categoryTabIndex,
+      );
+      if (categoryIndex >= 0) return categoryIndex;
+    }
     final index = homeCategories.indexWhere(
       (category) => category.index == tabIndex,
     );
@@ -434,14 +456,10 @@ class _HomePageState extends ConsumerState<HomePage> {
                 if (AppStyleTokens.of(context).isClassic)
                   HomeHero(
                     onSearch: _openSearch,
-                    onCategory: _openCategory,
                     cueLoader: widget.cueLoader,
                   )
                 else
-                  HomeMasthead(
-                    onSearch: _openSearch,
-                    onCategory: _openCategory,
-                  ),
+                  HomeMasthead(onSearch: _openSearch),
                 ValueListenableBuilder<double>(
                   valueListenable: _tabProgress,
                   builder: (context, progress, _) => HomeTabBar(
@@ -531,6 +549,9 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   Widget _buildTabPage(int target, double gridWidth, double textScale) {
     final palette = HomePalette.of(context);
+    if (target == _categoryTabIndex) {
+      return ColoredBox(color: palette.canvas, child: const CategoryPage(embedded: true));
+    }
     final saved = _tabStates[target];
     // 只记每个分类「第一次被建出来」的时刻：和 stall 行对齐就能看出
     // 那一下停顿是不是花在建页上。
@@ -1260,16 +1281,6 @@ class _HomePageState extends ConsumerState<HomePage> {
     Navigator.push(
       context,
       SearchRoute.open<void>(context, builder: (_) => const SearchPage()),
-    );
-  }
-
-  /// 官方搜索行右上角的「分类」入口（`alx.xml` `i_y`）。官方点它走
-  /// `turnToCategoryTab` → `//category` 路由（`BookCategoryActivity` →
-  /// `KmpCategoryFragment`）；这里打开同结构的分类页。
-  void _openCategory() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const CategoryPage()),
     );
   }
 

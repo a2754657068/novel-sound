@@ -69,14 +69,13 @@ class _ClassicShellDockState extends State<ClassicShellDock> {
   static const _maxSpringStep = 1 / 30;
 
   /// 单项理想宽度与 dock 总宽上限：手机上内容区自然宽度就是
-  /// 4 × 90 + 8 = 368；平板 / 桌面封顶后居中，不再整行拉伸（对齐
+  /// 3 × 90 + 8 = 278；平板 / 桌面封顶后居中，不再整行拉伸（对齐
   /// GlassDock 的固定宽度策略）。窄屏自适应收缩。
   static const _itemIdealWidth = 90.0;
-  static const _dockMaxWidth = _itemIdealWidth * 4 + _innerInset * 2;
+  static const _dockMaxWidth = _itemIdealWidth * 3 + _innerInset * 2;
 
   static const _items = [
     (LucideIcons.house, '首页'),
-    (LucideIcons.clapperboard, '短剧'),
     (LucideIcons.library_big, '书架'),
     (LucideIcons.circle_user_round, '我的'),
   ];

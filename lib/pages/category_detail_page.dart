@@ -7,7 +7,6 @@ import '../services/api_client.dart';
 import '../services/search_filters.dart';
 import '../widgets/search/search_media_tile.dart';
 import 'detail_page.dart';
-import 'series_detail_page.dart';
 
 /// 分类二级页：从分类页点一颗标签进来，看这个标签下的书。
 ///
@@ -44,7 +43,6 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
 
   /// 0 = 小说，1 = 短剧/漫剧。搜索会把三种媒介混在一起返回，分类浏览必须
   /// 自己分开，否则「玄幻脑洞」底下会冒出短剧卡片。
-  int _mediaTab = 0;
   /// 已抓到的全部候选（只按媒介档过滤）。分类/状态/字数筛选一律在本地做，
   /// 这样点子分类、切完结状态都是瞬时的，不用再打一轮网络。
   final List<MediaItem> _items = [];
@@ -65,7 +63,6 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
   int _round = 0;
 
   /// 短剧/漫剧没有分类落地页，退回搜索取候选（按 kind 过滤）。
-  int _searchOffset = 0;
   bool _hasMore = true;
   bool _loading = false;
   bool _loadedOnce = false;
@@ -110,10 +107,7 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
     _ => '0',
   };
 
-  bool _mediaKindMatches(MediaItem item) {
-    if (_mediaTab == 0) return item.kind == 'book';
-    return item.kind == 'video' || item.kind == 'manju';
-  }
+  bool _mediaKindMatches(MediaItem item) => item.kind == 'book';
 
   bool _matches(MediaItem item) {
     if (!_mediaKindMatches(item)) return false;
@@ -138,14 +132,13 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
     _subIndex = 0;
     _sortIndex = 0;
     _round = 0;
-    _searchOffset = 0;
   }
 
   /// 同一组筛选条件的上一份结果：切筛选切回来时先把它画出来，不用再等网络。
   static final Map<String, List<MediaItem>> _sessionCache = {};
 
   String get _cacheKey =>
-      '${widget.categoryId}|${widget.gender}|$_mediaTab|$_statusParam|'
+      '${widget.categoryId}|${widget.gender}|$_statusParam|'
       '$_wordsParam|${_filters.tag ?? ''}';
 
   Future<void> _load({bool reset = false}) async {
@@ -183,42 +176,10 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
     var stagnant = 0;
     try {
       // 一轮采样只有 10 本，还要过本地筛选，所以要连着轮换好几个组合。
-      final useSearch = _mediaTab == 1;
       // 服务端 `batch` 会并发打 6 个轮换组合并合并去重，一次就能拿到一屏
       // （实测 ~1.7s / 30–42 本），所以这里最多再补 2 轮，不再串行 14 圈。
-      final maxRounds = useSearch ? 12 : 3;
+      const maxRounds = 3;
       while (attempts < maxRounds && found.length < _pageTarget && _hasMore) {
-        if (useSearch) {
-          final tabs = await _api.searchTabs(widget.name, offset: _searchOffset);
-          final page = <MediaItem>[];
-          bool? hasMore;
-          for (final tab in tabs) {
-            page.addAll(tab.items);
-            if (tab.hasMore != null) hasMore = tab.hasMore;
-          }
-          if (page.isEmpty) {
-            _hasMore = false;
-            break;
-          }
-          _searchOffset += page.length;
-          if (hasMore == false) _hasMore = false;
-          attempts++;
-          var freshSearch = 0;
-          for (final item in page) {
-            if (_seen.contains(item.id)) continue;
-            freshSearch++;
-            if (!_matches(item)) continue;
-            if (!_seen.add(item.id)) continue;
-            found.add(item);
-          }
-          if (freshSearch == 0) {
-            stagnant++;
-            if (stagnant >= 3) _hasMore = false;
-          } else {
-            stagnant = 0;
-          }
-          continue;
-        }
         final payload = await _api.categoryFeed(
           id: widget.categoryId,
           gender: widget.gender,
@@ -315,12 +276,6 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
     }
   }
 
-  void _setMediaTab(int next) {
-    if (_mediaTab == next) return;
-    setState(() => _mediaTab = next);
-    unawaited(_load(reset: true));
-  }
-
   void _applyFilters(SearchFilters next) {
     // 纯本地筛选：候选池已经拉到内存里，切标签/状态/字数不该再走网络。
     setState(() => _filters = next);
@@ -341,20 +296,8 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
   }
 
   Future<void> _openItem(MediaItem item) async {
-    final isSeries = item.kind == 'video' || item.kind == 'manju';
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => isSeries
-            ? SeriesDetailPage(
-                seriesId: (item.seriesId ?? '').isEmpty
-                    ? item.id
-                    : item.seriesId!,
-                kind: item.kind,
-                title: item.title,
-                cover: item.cover,
-              )
-            : DetailPage(item: item),
-      ),
+      MaterialPageRoute<void>(builder: (_) => DetailPage(item: item)),
     );
   }
 
@@ -411,19 +354,6 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: double.infinity,
-            child: SegmentedButton<int>(
-              showSelectedIcon: false,
-              segments: const [
-                ButtonSegment<int>(value: 0, label: Text('小说')),
-                ButtonSegment<int>(value: 1, label: Text('短剧 · 漫剧')),
-              ],
-              selected: {_mediaTab},
-              onSelectionChanged: (values) => _setMediaTab(values.first),
-            ),
-          ),
-          const SizedBox(height: 8),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -575,11 +505,7 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
       if (_error != null) return const SizedBox.shrink();
       return Center(
         child: Text(
-          _loading
-              ? '正在加载…'
-              : _mediaTab == 0
-              ? '这个分类下暂时没有符合筛选条件的小说'
-              : '这个分类下暂时没有符合筛选条件的短剧/漫剧',
+          _loading ? '正在加载…' : '这个分类下暂时没有符合筛选条件的小说',
           style: theme.textTheme.bodyMedium,
         ),
       );

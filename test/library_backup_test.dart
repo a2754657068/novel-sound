@@ -316,6 +316,72 @@ void main() {
       );
     },
   );
+  test('a negative addedAt (local 1970) round-trips instead of failing', () {
+    // 旧记录缺 `addedAt` 时 ShelfStore 会兜成 `DateTime(1970)`，在 UTC+8 下
+    // 它的 millisecondsSinceEpoch 是负数；导出的备份必须还能自己读回来。
+    final payload = {
+      'format': 'fqapp.library-backup',
+      'version': 1,
+      'createdAt': -28800000,
+      'shelf': [
+        {
+          'id': '7000000000000000001',
+          'kind': 'book',
+          'title': '旧记录',
+          'cover': '',
+          'author': '',
+          'badge': '',
+          'ep': '',
+          'addedAt': -28800000,
+        },
+      ],
+      'history': const [],
+      'watched': const [],
+      'excludedLocalRecords': 0,
+    };
+    final bytes = Uint8List.fromList(utf8.encode(jsonEncode(payload)));
+    final backup = LibraryBackup.decode(bytes);
+    expect(backup.shelf, hasLength(1));
+    expect(backup.shelf.single.addedAt.millisecondsSinceEpoch, 0);
+    expect(backup.createdAt.millisecondsSinceEpoch, 0);
+    // 重新编码后再读，仍然是 0，不会又变回负数。
+    final again = LibraryBackup.decode(backup.encode());
+    expect(again.shelf.single.addedAt.millisecondsSinceEpoch, 0);
+  });
+
+  test('a timestamp that is not a number is still rejected', () {
+    final payload = {
+      'format': 'fqapp.library-backup',
+      'version': 1,
+      'createdAt': 1,
+      'shelf': [
+        {
+          'id': '7000000000000000002',
+          'kind': 'book',
+          'title': '坏记录',
+          'cover': '',
+          'author': '',
+          'badge': '',
+          'ep': '',
+          'addedAt': 'yesterday',
+        },
+      ],
+      'history': const [],
+      'watched': const [],
+      'excludedLocalRecords': 0,
+    };
+    final bytes = Uint8List.fromList(utf8.encode(jsonEncode(payload)));
+    expect(
+      () => LibraryBackup.decode(bytes),
+      throwsA(
+        isA<FormatException>().having(
+          (error) => error.message,
+          'message',
+          contains('收藏时间'),
+        ),
+      ),
+    );
+  });
 }
 
 MediaItem _item(

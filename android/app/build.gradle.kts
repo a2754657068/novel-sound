@@ -43,8 +43,10 @@ val hasReleaseSigning = listOf(
 // 这样同一台手机上可以同时装原版和本修改版（互不覆盖、数据各自独立）。
 // 默认保持上游的 com.fqapp.fqapp / 「什锦铺」，不影响正常构建。
 val coexistBuild = System.getenv("FQAPP_COEXIST")?.toBoolean() == true
-val appIdForBuild = if (coexistBuild) "com.fqapp.fqapp.mod" else "com.fqapp.fqapp"
-val appLabelForBuild = if (coexistBuild) "什锦铺·改" else "什锦铺"
+val appIdForBuild =
+    System.getenv("FQAPP_APP_ID") ?: if (coexistBuild) "com.fqapp.fqapp.mod" else "com.fqapp.fqapp"
+val appLabelForBuild =
+    System.getenv("FQAPP_APP_LABEL") ?: if (coexistBuild) "什锦铺·改" else "什锦铺"
 
 android {
     namespace = "com.fqapp.fqapp"

@@ -492,9 +492,9 @@ class _AudioPlaybackController extends ChangeNotifier
       case 'playPause':
         unawaited(_togglePlayback());
       case 'prev':
-        if (_index > 0) unawaited(_openChapter(_index - 1));
+        unawaited(_switchChapter(_index - 1));
       case 'next':
-        if (_index < _chapters.length - 1) unawaited(_openChapter(_index + 1));
+        unawaited(_switchChapter(_index + 1));
       case 'stop':
         if (onStop case final stop?) {
           stop();
@@ -1221,9 +1221,9 @@ class _AudioPlaybackController extends ChangeNotifier
 
   /// 后台续播：在**现有**播放器上换源。新建 mpv 实例在后台会卡在音频输出
   /// 初始化（`player.create` 25 秒超时，真机日志已确认），所以只能复用。
-  Future<void> _advanceInBackground() async {
-    final next = _index + 1;
-    if (next >= _chapters.length) return;
+  Future<void> _advanceInBackground([int? requested]) async {
+    final next = requested ?? _index + 1;
+    if (next < 0 || next >= _chapters.length || next == _index) return;
     final player = _player;
     if (player == null || !player.isCreated) {
       await _openChapter(next);
@@ -1270,6 +1270,27 @@ class _AudioPlaybackController extends ChangeNotifier
     } catch (error) {
       if (_current(generation)) _fail(error, generation);
     }
+  }
+
+  /// 锁屏 / 控制中心的上一章、下一章。
+  ///
+  /// 后台不能走 `_openChapter`：它先销毁旧播放器，而后台新建 mpv 会卡在音频
+  /// 输出初始化（真机日志里 25 秒超时、`opened paused` 永不出现），iOS 等到
+  /// 音频停下就挂起进程，媒体卡片随之消失。这里复用同一个播放器原地换源。
+  Future<void> _switchChapter(int target) async {
+    if (_closed) return;
+    if (target < 0 || target >= _chapters.length || target == _index) return;
+    final player = _player;
+    if (!_appActive && player != null && player.isCreated) {
+      unawaited(IosAudioSession.beginBackgroundWindow());
+      try {
+        await _advanceInBackground(target);
+      } finally {
+        await IosAudioSession.endBackgroundWindow();
+      }
+      return;
+    }
+    await _openChapter(target);
   }
 
   Future<void> _play(NativePlayer player, int generation) async {

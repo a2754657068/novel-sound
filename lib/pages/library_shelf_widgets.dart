@@ -18,9 +18,6 @@ class _ShelfKindFilter extends StatelessWidget {
   static const _options = <({String key, String label, String? value})>[
     (key: 'all', label: '全部', value: null),
     (key: 'book', label: '小说', value: 'book'),
-    (key: 'manga', label: '漫画', value: 'manga'),
-    (key: 'video', label: '短剧', value: 'video'),
-    (key: 'manju', label: '漫剧', value: 'manju'),
     (key: 'audio', label: '听书', value: 'audio'),
   ];
 

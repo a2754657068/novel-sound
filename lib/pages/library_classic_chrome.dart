@@ -294,9 +294,6 @@ mixin _LibraryClassicChrome on _LibraryShelfViews {
       for (final (value, label) in const [
         (null, '全部'),
         ('book', '小说'),
-        ('manga', '漫画'),
-        ('video', '短剧'),
-        ('manju', '漫剧'),
         ('audio', '听书'),
       ])
         HomeChip(

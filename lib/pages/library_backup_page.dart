@@ -440,7 +440,7 @@ class _LibraryBackupPageState extends State<LibraryBackupPage> {
                   setState(() => _helpExpanded = value),
               children: [
                 Text(
-                  '包含在线小说、听书、漫画、短剧和漫剧的收藏、已保存进度、'
+                  '包含在线小说、听书的收藏、已保存进度、'
                   '已看剧集与书架分组。\n\n'
                   '本地 TXT / EPUB 原文件、下载缓存、阅读时长、划线和应用设置需另行保留。\n\n'
                   '导出前请退出阅读或暂停播放，让当前进度保存；更换设备时传输备份文件，再在这里恢复。',

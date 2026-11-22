@@ -4,7 +4,6 @@ import 'services/audio_downloader.dart';
 import 'widgets/desktop_app_frame.dart';
 import 'services/native_player.dart';
 import 'services/desktop_platform.dart';
-import 'services/platform_capabilities.dart';
 import 'services/platform_channel.dart';
 
 import 'package:material_ui/material_ui.dart';
@@ -67,7 +66,6 @@ import 'widgets/lazy_indexed_stack.dart';
 import 'widgets/app_ui/app_ui_scope.dart';
 import 'widgets/dock_auto_hide.dart';
 import 'widgets/shell_dock.dart';
-import 'widgets/unsupported_feature_page.dart';
 import 'widgets/home/home_design.dart';
 
 Future<void> main() async {
@@ -716,22 +714,8 @@ class _RootShellState extends State<RootShell> with TickerProviderStateMixin {
           cueLoader: ApiClient.instance.searchCue,
         );
       case 1:
-        // iOS 首版没有原生播放器实现：把短剧页换成「暂不支持」占位，
-        // 避免进入播放页时触发缺失的 fqapp/native_player 通道。
-        return supportsVideoPlayback
-            ? const DramaPage()
-            : const UnsupportedFeaturePage(
-                icon: LucideIcons.clapperboard,
-                title: '短剧暂不支持',
-                description: '当前平台没有内置视频播放器。搜书、书架和阅读可以正常使用。',
-              );
-      case 2:
-        // 空书架上的「去书城找书」切回首页 tab；收藏空态的「找短剧」
-        // 切到短剧 tab。
-        return LibraryPage(
-          onBrowse: () => _selectTab(0),
-          onFindDrama: () => _selectTab(1),
-        );
+        // 烂番茄版只保留小说与听书：空书架上的「去书城找书」切回首页。
+        return LibraryPage(onBrowse: () => _selectTab(0));
       default:
         return const MinePage();
     }
@@ -936,24 +920,18 @@ class _RootShellState extends State<RootShell> with TickerProviderStateMixin {
             index: index,
             children: [
               HomePage(cueLoader: ApiClient.instance.searchCue),
-              const DramaPage(),
-              LibraryPage(
-                onBrowse: () => desktopTab.value = 0,
-                onFindDrama: () => desktopTab.value = 1,
-              ),
+              LibraryPage(onBrowse: () => desktopTab.value = 0),
               const MinePage(),
             ],
           );
         },
       );
     }
-    AudioFloatingRouteScope.configure(context, hidden: _index == 1);
+    AudioFloatingRouteScope.configure(context, hidden: _index == 2);
     final palette = HomePalette.of(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final isDramaTab = _index == 1;
-    // 短剧的推荐频道压在全屏视频流上，dock 用深色玻璃；看剧/漫剧/最近/收藏
-    // 是浅色页，dock 跟主题走，否则浅色外观下页面是奶白、dock 还是黑的。
-    final dramaOnVideo = isDramaTab && !dramaLightPageNotifier.value;
+    // 烂番茄版没有短剧 tab，壳层不再有视频流背景。
+    const dramaOnVideo = false; // ignore: unused_local_variable
     // 系统导航栏（Android 底部系统自绘的那条）按当前画布取色。Flutter 的
     // light / dark 两套预设都把它写成纯黑底 + 白图标，浅色页面下会在最底部
     // 留一条突兀的黑带；短剧只有视频流（推荐）背后是视频，仍用黑。
@@ -971,17 +949,11 @@ class _RootShellState extends State<RootShell> with TickerProviderStateMixin {
                     ? SystemUiOverlayStyle.light
                     : SystemUiOverlayStyle.dark)
                 .copyWith(
-                  // 状态栏显式铺成画布色：透明状态栏在 Android 10+ 会被系统
-                  // 叠一层对比度黑纱，奶白画布会被压成灰带。短剧视频流仍透明。
-                  statusBarColor: dramaOnVideo
-                      ? Colors.transparent
-                      : palette.canvas,
-                  systemNavigationBarColor: dramaOnVideo
-                      ? Colors.black
-                      : palette.canvas,
-                  systemNavigationBarDividerColor: dramaOnVideo
-                      ? Colors.black
-                      : palette.canvas,
+                  // 状态栏与系统导航栏都铺成画布色：透明状态栏在
+                  // Android 10+ 会被系统叠一层对比度黑纱。
+                  statusBarColor: palette.canvas,
+                  systemNavigationBarColor: palette.canvas,
+                  systemNavigationBarDividerColor: palette.canvas,
                   systemNavigationBarIconBrightness: lightSystemIcons
                       ? Brightness.light
                       : Brightness.dark,
@@ -1001,7 +973,7 @@ class _RootShellState extends State<RootShell> with TickerProviderStateMixin {
                     key: const ValueKey('root-page-stack'),
                     fit: StackFit.expand,
                     children: [
-                      for (var i = 0; i < 4; i++)
+                      for (var i = 0; i < 3; i++)
                         if (_visitedTabs.contains(i))
                           KeyedSubtree(
                             key: ValueKey('root-tab-$i'),

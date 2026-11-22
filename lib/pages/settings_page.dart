@@ -31,12 +31,8 @@ import '../services/app_theme_style.dart';
 import '../services/app_style_tokens.dart';
 import '../services/audio_preferences.dart';
 import '../services/desktop_platform.dart';
-import '../services/linux_platform.dart' show isLinuxDesktop;
-import '../services/native_player.dart';
-import '../services/player_layout_preferences.dart';
 import '../services/player_preferences.dart';
 import '../services/book_open_preferences.dart';
-import '../services/drama_mute_preferences.dart';
 import '../services/haptic_preferences.dart';
 import '../services/library_store.dart';
 import '../widgets/desktop_settings_body.dart';
@@ -47,7 +43,6 @@ import '../widgets/wenku/wenku_ui.dart';
 import 'about_page.dart';
 import 'api_service_page.dart';
 import 'cached_books_page.dart';
-import 'cached_dramas_page.dart';
 import 'library_backup_page.dart';
 import 'settings_category_page.dart';
 import 'system_tts_settings_page.dart';
@@ -73,8 +68,8 @@ class SettingsPage extends StatelessWidget {
         subtitle: isMediaDesktop
             ? '主题模式、OLED 纯黑'
             : HapticPreferences.supported
-            ? '主题模式、振动反馈、播放页布局'
-            : '主题模式、OLED 纯黑、播放页布局',
+            ? '主题模式、振动反馈'
+            : '主题模式、OLED 纯黑',
         // 用 builder 而不是固定 items：切到深色 / 切回浅色后，分类页重建
         // 时会重新判定，OLED 行不必退出重进就能出现或消失。
         // 播放页布局只在手机端有效（Windows/Linux 由桌面播放器承担）。
@@ -85,7 +80,6 @@ class SettingsPage extends StatelessWidget {
             systemBrightness: MediaQuery.platformBrightnessOf(context),
           ))
             _oledModeItem(),
-          if (!isMediaDesktop) _playerLayoutItem(),
         ],
       ),
       SettingsCategory(
@@ -150,17 +144,6 @@ class SettingsPage extends StatelessWidget {
           ),
         ],
       ),
-      if (!isLinuxDesktop)
-        SettingsCategory(
-          icon: SettingsCategoryIcons.drama,
-          title: '短剧',
-          subtitle: '播放',
-          items: [
-            _muteWhenColdStartItem(),
-            if (!isMediaDesktop) _floatingWindowItem(),
-            if (!isMediaDesktop) _videoDecoderItem(),
-          ],
-        ),
       SettingsCategory(
         icon: SettingsCategoryIcons.data,
         title: '数据',
@@ -182,15 +165,6 @@ class SettingsPage extends StatelessWidget {
             onTap: (context, _) => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const CachedBooksPage()),
-            ),
-          ),
-          SettingsItem(
-            icon: CupertinoIcons.play_rectangle,
-            title: '短剧离线缓存',
-            subtitle: isLinuxDesktop ? '管理已下载文件和下载任务' : '短剧下载、离线播放和清理缓存',
-            onTap: (context, _) => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const CachedDramasPage()),
             ),
           ),
           _clearHistItem(),
@@ -475,45 +449,6 @@ class SettingsPage extends StatelessWidget {
   /// 播放页布局：沉浸式 / 横屏片源自动分屏 / 始终分屏。
   ///
   /// 只影响短剧播放页，Windows 隐藏（桌面已有 304dp 停靠选集面板）。
-  SettingsItem _playerLayoutItem() => SettingsItem(
-    icon: CupertinoIcons.rectangle_split_3x1,
-    title: '播放页布局',
-    rowBuilder: (context) => ValueListenableBuilder<PlayerLayoutMode>(
-      valueListenable: PlayerLayoutPreferences.mode,
-      builder: (context, value, _) => GlassSettingMenu<PlayerLayoutMode>(
-        icon: CupertinoIcons.rectangle_split_3x1,
-        label: '播放页布局',
-        value: value,
-        // 行内保留短标签（「自动分屏」），弹层里仍是完整说明性标签。
-        valueLabel: value.shortLabel,
-        options: {for (final mode in PlayerLayoutMode.values) mode: mode.label},
-        reduceMotion: MediaQuery.disableAnimationsOf(context),
-        onChanged: (mode) => _setPlayerLayout(context, mode),
-      ),
-    ),
-  );
-
-  Future<void> _setPlayerLayout(
-    BuildContext context,
-    PlayerLayoutMode value,
-  ) async {
-    final previous = PlayerLayoutPreferences.mode.value;
-    if (previous == value) return;
-    PlayerLayoutPreferences.mode.value = value;
-    try {
-      if (!await PlayerLayoutPreferences.save(value)) {
-        throw StateError('Player layout preference was not saved');
-      }
-    } catch (_) {
-      // 落盘失败就退回原选择，避免界面显示与实际不一致。
-      PlayerLayoutPreferences.mode.value = previous;
-      if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('未能保存播放页布局，已恢复原设置')));
-      }
-    }
-  }
 
   // ── 阅读 ──────────────────────────────────────────────────────────────
 
@@ -521,39 +456,6 @@ class SettingsPage extends StatelessWidget {
   /// 切后台悬浮窗播放（#24，默认关）：开启且已授予悬浮窗权限时，切到
   /// 后台或锁屏用悬浮小窗继续播；关闭则切后台暂停（现有行为）。
   /// 开启时若无权限，先打开系统设置让用户授予，授予后回来再点一次。
-  SettingsItem _floatingWindowItem() => SettingsItem(
-    icon: CupertinoIcons.rectangle_on_rectangle,
-    title: '切后台悬浮窗播放',
-    rowBuilder: (context) => ValueListenableBuilder<bool>(
-      valueListenable: PlayerPreferences.floatingWindow,
-      builder: (context, value, _) => SettingsToggleRow(
-        icon: CupertinoIcons.rectangle_on_rectangle,
-        title: '切后台悬浮窗播放',
-        description: '切到后台或锁屏时用悬浮小窗继续播放，需要悬浮窗权限',
-        value: value,
-        // 系统授权页期间不能先把开关画成「开」；授权回来后才跟随偏好翻转。
-        optimistic: false,
-        onChanged: (enabled) => _setFloatingWindow(context, enabled),
-      ),
-    ),
-  );
-
-  Future<void> _setFloatingWindow(BuildContext context, bool enabled) async {
-    if (!enabled) {
-      await PlayerPreferences.setFloatingWindow(false);
-      return;
-    }
-    if (await NativePlayer.canDrawOverlays()) {
-      await PlayerPreferences.setFloatingWindow(true);
-      return;
-    }
-    await NativePlayer.requestOverlayPermission();
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请在系统设置中允许“显示在其他应用的上层”，然后回来再开启')),
-      );
-    }
-  }
 
   /// 默认关＝现有行为（先进详情页）。听书/短剧与加载失败时仍停留在详情页。
   ///
@@ -633,30 +535,11 @@ class SettingsPage extends StatelessWidget {
 
   /// 官方设置项「开启应用时默认静音」（`GlobalMuteConfig` 标题，持久层
   /// `open_mute_when_cold_start`，默认 false＝有声起播）。
-  SettingsItem _muteWhenColdStartItem() => SettingsItem(
-    icon: CupertinoIcons.volume_off,
-    title: '开启应用时默认静音',
-    rowBuilder: (context) => ValueListenableBuilder<bool>(
-      valueListenable: DramaMutePreferences.instance.muteWhenColdStart,
-      builder: (context, value, _) => SettingsToggleRow(
-        icon: CupertinoIcons.volume_off,
-        title: '开启应用时默认静音',
-        description: '进入短剧时静音播放，可在播放页取消',
-        value: value,
-        onChanged: DramaMutePreferences.instance.set,
-      ),
-    ),
-  );
 
   /// 视频解码器（issue #92）：硬解异常的机型可以手动切软解。
   ///
   /// 只有**新起的播放器**会采用新设置——ExoPlayer 的 renderer 在 build 时
   /// 定型，所以行内说明写明需重新进入播放页。
-  SettingsItem _videoDecoderItem() => SettingsItem(
-    icon: CupertinoIcons.videocam,
-    title: '视频解码器',
-    rowBuilder: (context) => const _VideoDecoderMenu(),
-  );
 
   // ── 数据 ──────────────────────────────────────────────────────────────
 

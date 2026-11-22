@@ -164,7 +164,7 @@ class LibraryBackup {
       }
       if (ai is String) aiData = ai;
     }
-    final createdAt = _integer(raw['createdAt'], '备份时间', 8640000000000000);
+    final createdAt = _timestamp(raw['createdAt'], '备份时间');
     final shelf = <ShelfRecord>[];
     final shelfKeys = <String>{};
     for (final value in _list(raw['shelf'])) {
@@ -198,9 +198,7 @@ class LibraryBackup {
       shelf.add(
         ShelfRecord(
           item: item,
-          addedAt: DateTime.fromMillisecondsSinceEpoch(
-            _integer(record['addedAt'], '收藏时间', 8640000000000000),
-          ),
+          addedAt: _timestamp(record['addedAt'], '收藏时间'),
         ),
       );
     }
@@ -292,7 +290,7 @@ class LibraryBackup {
       });
     }
     return LibraryBackup._(
-      createdAt: DateTime.fromMillisecondsSinceEpoch(createdAt),
+      createdAt: createdAt,
       shelf: List.unmodifiable(shelf),
       history: List.unmodifiable(history),
       watched: Map.unmodifiable(watched),
@@ -394,7 +392,9 @@ class LibraryBackup {
     if (record.item.wordNumber > 0) 'wordNumber': record.item.wordNumber,
     if (record.item.seriesId != null) 'seriesId': record.item.seriesId,
     if (record.item.episodeId != null) 'episodeId': record.item.episodeId,
-    'addedAt': record.addedAt.millisecondsSinceEpoch,
+    'addedAt': record.addedAt.millisecondsSinceEpoch < 0
+        ? 0
+        : record.addedAt.millisecondsSinceEpoch,
   };
 
   /// `null`/empty means "this file has no groups"; anything else must pass the
@@ -476,6 +476,27 @@ class LibraryBackup {
       throw const FormatException('备份含无效作品标识或本地书籍记录');
     }
     return value;
+  }
+
+  /// 时间戳解码：允许负数（1970 年前的本地时间）。
+  ///
+  /// `DateTime(1970)` 是**本地**零点，在 UTC+8 下 `millisecondsSinceEpoch`
+  /// 是 -28800000。旧记录缺 `addedAt` 时正好落到这个默认值，编码后就成了
+  /// 负数——按 `_integer` 的「必须 >= 0」规则，导出的备份自己都读不回来
+  /// （报「备份字段 收藏时间 无效」）。这里把负数钳到 0。
+  static DateTime _timestamp(dynamic value, String label) {
+    final max = 8640000000000000;
+    final int ms;
+    switch (value) {
+      case int v:
+        ms = v;
+      case double v:
+        ms = v.isFinite ? v.round() : (throw FormatException('备份字段 $label 无效'));
+      default:
+        throw FormatException('备份字段 $label 无效');
+    }
+    if (ms > max || ms < -max) throw FormatException('备份字段 $label 无效');
+    return DateTime.fromMillisecondsSinceEpoch(ms < 0 ? 0 : ms);
   }
 
   static int _integer(dynamic value, String label, int max) {

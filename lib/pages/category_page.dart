@@ -30,7 +30,10 @@ import 'search_page.dart';
 ///
 /// 数据一次 GET 一个频道（`category_tab` 不同瓦片不同）。
 class CategoryPage extends StatefulWidget {
-  const CategoryPage({super.key, this.loader});
+  const CategoryPage({super.key, this.loader, this.embedded = false});
+
+  /// 内嵌进首页「分类」顶栏时用：不画 Scaffold/SafeArea、不画返回键与搜索键。
+  final bool embedded;
 
   /// 数据源注入（生产默认 [ApiClient.categoryFront]；测试替换，同
   /// [SearchPage] 的 loader 规矩——页测不落网络）。
@@ -72,6 +75,15 @@ int _chipColumnsFor(double contentWidth) => (contentWidth / _chipTargetWidth)
 class _CategoryPageState extends State<CategoryPage> {
   CategoryFront? _front;
   String? _error;
+
+  /// 烂番茄版不再有短剧/漫剧/漫画：上游 `rule.tab[]` 里这几条频道直接不画，
+  /// 免得点进去还是小说内容。
+  static const _hiddenTabNames = {'短剧', '漫剧', '漫画'};
+
+  List<CategoryTab> _visibleTabs() => [
+    for (final tab in _front?.tabs ?? const <CategoryTab>[])
+      if (!_hiddenTabNames.any(tab.name.contains)) tab,
+  ];
   int _tabValue = 1;
   int _selected = 0;
   bool _loading = false;
@@ -262,20 +274,28 @@ class _CategoryPageState extends State<CategoryPage> {
   @override
   Widget build(BuildContext context) {
     final palette = HomePalette.of(context);
-    final front = _front;
+    final content = _content();
+    if (widget.embedded) {
+      return ColoredBox(color: palette.canvas, child: content);
+    }
     return Scaffold(
       backgroundColor: palette.canvas,
-      body: SafeArea(
-        bottom: false,
-        child: Column(
-          children: [
-            _TopBar(
-              tabs: front?.tabs ?? const [],
-              selected: _tabValue,
-              onSelect: (v) => _load(tab: int.tryParse(v) ?? 1),
-              onSearch: _openSearch,
-            ),
-            if (_loading)
+      body: SafeArea(bottom: false, child: content),
+    );
+  }
+
+  Widget _content() {
+    final front = _front;
+    return Column(
+      children: [
+        _TopBar(
+          tabs: _visibleTabs(),
+          selected: _tabValue,
+          onSelect: (v) => _load(tab: int.tryParse(v) ?? 1),
+          onSearch: widget.embedded ? null : _openSearch,
+          embedded: widget.embedded,
+        ),
+        if (_loading)
               Padding(
                 padding: const EdgeInsets.only(top: 120),
                 child: CircularProgressIndicator(color: HomePalette.accent),
@@ -293,40 +313,38 @@ class _CategoryPageState extends State<CategoryPage> {
                   ),
                 ),
               )
-            else if (front != null)
-              Expanded(
-                // 列数按实际内容区宽度算：手机仍是官方三列，桌面按 170dp
-                // 一颗的目标宽度加列，免得 chip 被拉成细长横条。
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final columns = _chipColumnsFor(
-                      constraints.maxWidth - categoryDimRailWidth - 32,
-                    );
-                    _columns = columns;
-                    return Row(
-                      children: [
-                        CategoryDimRail(
-                          titles: [
-                            for (final section in _sections) section.title,
-                          ],
-                          selectedIndex: _selected,
-                          onSelect: _scrollToSection,
-                        ),
-                        Expanded(
-                          child: _SectionList(
-                            state: this,
-                            columns: columns,
-                            onSearch: (name) => _openSearch(tag: name),
-                          ),
-                        ),
+        else if (front != null)
+          Expanded(
+            // 列数按实际内容区宽度算：手机仍是官方三列，桌面按 170dp
+            // 一颗的目标宽度加列，免得 chip 被拉成细长横条。
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final columns = _chipColumnsFor(
+                  constraints.maxWidth - categoryDimRailWidth - 32,
+                );
+                _columns = columns;
+                return Row(
+                  children: [
+                    CategoryDimRail(
+                      titles: [
+                        for (final section in _sections) section.title,
                       ],
-                    );
-                  },
-                ),
-              ),
-          ],
-        ),
-      ),
+                      selectedIndex: _selected,
+                      onSelect: _scrollToSection,
+                    ),
+                    Expanded(
+                      child: _SectionList(
+                        state: this,
+                        columns: columns,
+                        onSearch: (name) => _openSearch(tag: name),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+      ],
     );
   }
 }
@@ -338,12 +356,16 @@ class _TopBar extends StatelessWidget {
     required this.selected,
     required this.onSelect,
     required this.onSearch,
+    this.embedded = false,
   });
+
+  /// 内嵌到首页顶栏时：不画返回键，搜索键由 [onSearch] 是否为空决定。
+  final bool embedded;
 
   final List<CategoryTab> tabs;
   final int selected;
   final ValueChanged<String> onSelect;
-  final VoidCallback onSearch;
+  final VoidCallback? onSearch;
 
   @override
   Widget build(BuildContext context) {
@@ -354,7 +376,9 @@ class _TopBar extends StatelessWidget {
         children: [
           // 桌面壳层顶栏已经有「← 什锦铺」，这里再放一个返回键就是两个
           // 箭头上下叠着。手机上保留官方形态。
-          if (isWindowsDesktop)
+          if (embedded)
+            const SizedBox(width: 16)
+          else if (isWindowsDesktop)
             const SizedBox(width: 16)
           else
             IconButton(
@@ -401,12 +425,13 @@ class _TopBar extends StatelessWidget {
                     },
                   ),
           ),
-          IconButton(
-            key: const Key('category_search'),
-            icon: Icon(LucideIcons.search, size: 20, color: palette.ink),
-            tooltip: '搜索',
-            onPressed: onSearch,
-          ),
+          if (onSearch != null)
+            IconButton(
+              key: const Key('category_search'),
+              icon: Icon(LucideIcons.search, size: 20, color: palette.ink),
+              tooltip: '搜索',
+              onPressed: onSearch,
+            ),
         ],
       ),
     );
