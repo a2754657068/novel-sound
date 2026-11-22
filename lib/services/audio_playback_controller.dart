@@ -246,6 +246,10 @@ class _AudioPlaybackController extends ChangeNotifier
 
   void start() {
     WidgetsBinding.instance.addObserver(this);
+    // 锁屏卡片与控制中心按钮：iOS 侧由 AppDelegate 的 AudioSessionBridge 接管，
+    // 安卓侧走前台服务，这里只做订阅，两个平台共用同一套远端命令处理。
+    IosAudioSession.install();
+    IosAudioSession.onAction = _handleIosRemoteAction;
     if (isLinuxDesktop) {
       DesktopSystemSession.instance.addListener(_systemSessionChanged);
     }
@@ -466,6 +470,7 @@ class _AudioPlaybackController extends ChangeNotifier
     if (!isLinuxDesktop &&
         !AudioPreferences.instance.backgroundPlayback.value) {
       unawaited(NativePlayer.stopListenForeground(owner: _mediaOwner));
+      unawaited(IosAudioSession.stop());
       return;
     }
     final player = _player;
@@ -489,6 +494,32 @@ class _AudioPlaybackController extends ChangeNotifier
         speed: _rate,
       ),
     );
+    // iOS 没有前台服务，锁屏卡片要自己维护（安卓那条通道在 native 侧处理）。
+    unawaited(
+      IosAudioSession.update(
+        title: _title,
+        episode: _chapters[_index].title,
+        cover: _cover,
+        playing: isPlaying,
+        positionMs: player?.position.inMilliseconds ?? 0,
+        durationMs: _duration.inMilliseconds,
+        rate: _rate,
+        hasPrev: _index > 0,
+        hasNext: _index < _chapters.length - 1,
+      ),
+    );
+  }
+
+  /// iOS 的 MPRemoteCommandCenter 事件：`seek` 需要单独处理，其余与安卓同路。
+  void _handleIosRemoteAction(String action, int? positionMs) {
+    if (_closed) return;
+    if (action == 'seek') {
+      if (positionMs != null) {
+        unawaited(_seekTo(Duration(milliseconds: positionMs)));
+      }
+      return;
+    }
+    _handleRemoteAction(action);
   }
 
   void _handleRemoteAction(String action) {
@@ -1284,6 +1315,8 @@ class _AudioPlaybackController extends ChangeNotifier
     _cancelTrackRequests();
     ListeningSession.instance.clear();
     unawaited(NativePlayer.stopListenForeground(owner: _mediaOwner));
+    unawaited(IosAudioSession.stop());
+    IosAudioSession.onAction = null;
     ++_generation;
     _saveTimer?.cancel();
     _listenTime.stop();
