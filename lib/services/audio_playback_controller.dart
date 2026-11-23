@@ -882,6 +882,12 @@ class _AudioPlaybackController extends ChangeNotifier
       });
       _publishReadAlong();
       _publishMoreState();
+      // 原地换源之后必须重挂监听：订阅闭包捕获的是创建播放器时的 generation，
+      // 而这里 `++_generation` 已经把它换掉，不重挂的话位置/播放结束/错误事件
+      // 都会被 `_current` 判成过期丢弃——表现为「后台换过一次章之后再也检测不到
+      // 章节结束」。
+      _unsubscribe();
+      _subscribe(player, generation);
       await player.setRate(_rate);
       if (!_current(generation, player)) return;
       _syncForeground();
@@ -1227,6 +1233,13 @@ class _AudioPlaybackController extends ChangeNotifier
       Duration(milliseconds: (duration.inMilliseconds * clamped).round()),
       duration,
     );
+  }
+
+  void _unsubscribe() {
+    for (final sub in _subscriptions) {
+      sub.cancel().catchError((Object _) {});
+    }
+    _subscriptions.clear();
   }
 
   void _subscribe(NativePlayer player, int generation) {
