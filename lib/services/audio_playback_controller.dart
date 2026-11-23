@@ -481,7 +481,6 @@ class _AudioPlaybackController extends ChangeNotifier
     _handleRemoteAction(action);
   }
 
-
   void _handleRemoteAction(String action) {
     if (_closed) return;
     switch (action) {
@@ -1051,6 +1050,13 @@ class _AudioPlaybackController extends ChangeNotifier
     );
   }
 
+  void _unsubscribe() {
+    for (final sub in _subscriptions) {
+      sub.cancel().catchError((Object _) {});
+    }
+    _subscriptions.clear();
+  }
+
   void _subscribe(NativePlayer player, int generation) {
     _subscriptions.addAll([
       player.positionStream.listen((position) {
@@ -1255,6 +1261,12 @@ class _AudioPlaybackController extends ChangeNotifier
       });
       _publishReadAlong();
       _publishMoreState();
+      // 原地换源之后必须重挂监听：订阅闭包捕获的是创建播放器时的 generation，
+      // 而这里 `++_generation` 已经把它换掉，不重挂的话位置/播放结束/错误事件
+      // 都会被 `_current` 判成过期丢弃——表现为「后台换过一次章之后再也检测
+      // 不到章节结束」。
+      _unsubscribe();
+      _subscribe(player, generation);
       unawaited(_loadExcerpt(itemId));
       unawaited(_refreshSubtitles(generation, itemId, source.toneId));
       unawaited(_refreshTimePoints(generation, itemId, source.toneId));
