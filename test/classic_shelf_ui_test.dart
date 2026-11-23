@@ -22,6 +22,7 @@ import 'package:fqapp/services/classic_shelf_layout.dart';
 import 'package:fqapp/services/library_store.dart';
 import 'package:fqapp/services/shelf_group_store.dart';
 import 'package:fqapp/services/shelf_store.dart';
+import 'package:fqapp/services/shell_visibility.dart';
 import 'package:fqapp/services/shelf_view_store.dart';
 import 'package:fqapp/widgets/bookshelf_card.dart';
 import 'package:fqapp/widgets/tab_swipe_area.dart';
@@ -410,6 +411,48 @@ void main() {
         }
       }
       expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('壳层可见时切换版式立即生效', (tester) async {
+      // 烂番茄壳层把书架挂在 1 号位；页面必须拿到同一个下标，否则
+      // `_visible` 恒为 false，版式/排序/筛选/分组/进度的变化都会被
+      // `_storeChanged` 丢掉，要等子树被别的原因重建才生效。
+      shellVisibleTab.value = 1;
+      addTearDown(() => shellVisibleTab.value = null);
+      // 点按钮会触发一次偏好写入；假时钟下这条平台通道调用不会自己完成，
+      // 先清掉写入链，免得组里的 `whenIdle()` 等到测试超时。
+      addTearDown(ClassicShelfLayout.instance.resetForTest);
+      await _size(tester);
+      await tester.runAsync(() async {
+        await ShelfStore.instance.add(_item());
+      });
+      await tester.pumpWidget(
+        _app(_style(), page: LibraryPage(shellIndex: 1)),
+      );
+      await tester.pump();
+      expect(
+        find.byKey(const PageStorageKey('classic-shelf-grid-0')),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(const Key('shelf-layout-list')));
+      // 偏好写入走平台通道，必须在真实时钟里排干，否则 tearDown 的
+      // `whenIdle()` 会一直等到测试超时。
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(
+        find.byKey(const PageStorageKey('classic-shelf-list-0')),
+        findsOneWidget,
+        reason: '点列表版式后这一帧就该换成列表',
+      );
+      expect(
+        find.byKey(const PageStorageKey('classic-shelf-grid-0')),
+        findsNothing,
+      );
     });
 
     testWidgets('书架下划线落在标签正中心，切换后跟随', (tester) async {

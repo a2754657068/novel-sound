@@ -715,7 +715,7 @@ class _RootShellState extends State<RootShell> with TickerProviderStateMixin {
         );
       case 1:
         // 烂番茄版只保留小说与听书：空书架上的「去书城找书」切回首页。
-        return LibraryPage(onBrowse: () => _selectTab(0));
+        return LibraryPage(shellIndex: 1, onBrowse: () => _selectTab(0));
       default:
         return const MinePage();
     }
@@ -920,7 +920,7 @@ class _RootShellState extends State<RootShell> with TickerProviderStateMixin {
             index: index,
             children: [
               HomePage(cueLoader: ApiClient.instance.searchCue),
-              LibraryPage(onBrowse: () => desktopTab.value = 0),
+              LibraryPage(shellIndex: 1, onBrowse: () => desktopTab.value = 0),
               const MinePage(),
             ],
           );
