@@ -7,6 +7,7 @@ class _AudioPlaybackController extends ChangeNotifier
   _AudioPlaybackController(this.request);
   final AudioPage request;
   bool _closed = false;
+
   Future<void>? _closing;
   VoidCallback? onStop;
 
@@ -119,6 +120,9 @@ class _AudioPlaybackController extends ChangeNotifier
   int? _advanceRemaining;
   final ValueNotifier<int?> _advanceCountdown = ValueNotifier<int?>(null);
 
+  /// 章末提前预取的下一章音源（见 `audio_playback_preload.dart`）。
+  _AudioPrefetch? _audioPrefetch;
+
   /// 跳过片头/片尾（按书，打开章节时读入）。
   AudioSkipPoints _skipPoints = AudioSkipPoints.none;
 
@@ -130,6 +134,10 @@ class _AudioPlaybackController extends ChangeNotifier
   bool _inShelf = false;
   bool _switchingVersion = false;
   final Map<String, AudioSource> _audioSourceCache = {};
+
+  /// 同一章的取流请求只发一次：预加载与本体的 `_openChapter` 可能同时要
+  /// 下一章的音源，去重后两边共用同一个 Future。
+  final Map<String, Future<AudioSource>> _audioSourceRequests = {};
   Timer? _sleepTimerTick;
 
   void _prefetchNextAudioChapter() {
@@ -547,6 +555,7 @@ class _AudioPlaybackController extends ChangeNotifier
       unawaited(_resumeAfterVisibility());
     }
     if (!_appActive) {
+      // 预取只持有音源，不占播放器实例，后台换章正好用得上，所以留着。
       // 切换到后台或锁屏时立即持久化当前进度，防止后续被系统杀后台导致进度丢失。
       unawaited(_persistProgress());
       // 若后台听书开关关闭，切后台自动暂停播放并移除前台通知。
@@ -597,6 +606,9 @@ class _AudioPlaybackController extends ChangeNotifier
     if (_closed || index < 0 || index >= _chapters.length) return;
     // 任何换章动作都意味着用户自己接管了，倒计时窗口必须作废。
     _cancelAdvanceCountdown(this);
+    // 提前预取的音源：章节和音色都对得上才用；换成新播放器起播，不接管
+    // 任何既有的 mpv 实例（同进程双实例会没声音）。
+    final prefetched = _takeAudioPrefetch(_chapters[index].itemId, toneId);
     final generation = ++_generation;
     ++_seekGeneration;
     _saveTimer?.cancel();
@@ -655,7 +667,7 @@ class _AudioPlaybackController extends ChangeNotifier
           completed ??
           (position == null && sameChapter && saved?['completed'] == true);
       final itemId = _chapters[index].itemId;
-      final source = await _loadSourceWithRetry(itemId);
+      final source = prefetched ?? await _loadSourceWithRetry(itemId);
       if (!_current(generation)) return;
       final uri = Uri.tryParse(source.url);
       // 离线命中给的是 `file://<path>`：本地文件桥不经 HTTP，没有 host。
@@ -773,6 +785,8 @@ class _AudioPlaybackController extends ChangeNotifier
       } else {
         await candidate?.dispose();
       }
+    } finally {
+      // 预取只持有音源，没有播放器要归还。
     }
   }
 
@@ -785,7 +799,23 @@ class _AudioPlaybackController extends ChangeNotifier
   ///
   /// A pure-TTS book has no default voice: the playinfo endpoint answers
   /// NO_THIS_TONE for tone 0, so the first selectable voice is retried once.
-  Future<AudioSource> _loadSourceWithRetry(String itemId) async {
+  /// 同一章、同一音色的取流请求合并成一次：预加载和 `_openChapter` 可能
+  /// 同时要下一章的音源，去重后两边等同一个 Future，不重复打上游。
+  Future<AudioSource> _loadSourceWithRetry(String itemId) {
+    final key = '$itemId|$_toneId';
+    final pending = _audioSourceRequests[key];
+    if (pending != null) return pending;
+    late final Future<AudioSource> request;
+    request = _loadSourceOnce(itemId).whenComplete(() {
+      if (identical(_audioSourceRequests[key], request)) {
+        _audioSourceRequests.remove(key);
+      }
+    });
+    _audioSourceRequests[key] = request;
+    return request;
+  }
+
+  Future<AudioSource> _loadSourceOnce(String itemId) async {
     // 已下载的章节直接命中本地文件：离线可播，在线也不重复拉流。本地命中
     // 排在注入 loader 之前，测试才能覆盖「离线优先」这条真实顺序。
     final local = await _localSource(itemId, _toneId);
@@ -1064,6 +1094,7 @@ class _AudioPlaybackController extends ChangeNotifier
         // Notifier-only: the 5Hz tick rebuilds the progress row, not the page.
         _position.value = _boundedPosition(position, _duration);
         _publishReadAlong();
+        _prepareNextAudio();
         // 片尾跳过：进入尾部区间就按「本章播完」处理，复用同一条完成路径，
         // 用 _skipOutroFired 挡住重复触发。
         if (!_completed &&
@@ -1129,6 +1160,7 @@ class _AudioPlaybackController extends ChangeNotifier
         !player.buffering) {
       _listenTime.start();
       _prefetchNextAudioChapter();
+      _prepareNextAudio();
     } else {
       _listenTime.stop();
     }
@@ -1174,6 +1206,7 @@ class _AudioPlaybackController extends ChangeNotifier
   }
 
   Future<void> _releasePlayer() {
+    unawaited(_dropAudioPreload());
     final player = _player;
     _player = null;
     _activeIndex = null;
@@ -1225,9 +1258,13 @@ class _AudioPlaybackController extends ChangeNotifier
     _publishMoreState();
   }
 
-  /// 后台续播：在**现有**播放器上换源。新建 mpv 实例在后台会卡在音频输出
-  /// 初始化（`player.create` 25 秒超时，真机日志已确认），所以只能复用。
-  Future<void> _advanceInBackground([int? requested]) async {
+  /// 原地续播：在**现有**播放器上换源（`reopen`），不新建 mpv。
+  ///
+  /// 后台必须这样：新建 mpv 实例在后台会卡在音频输出初始化（真机日志里
+  /// `player.create` 25 秒超时）。前台同样用它，因为冷启一个 mpv 要
+  /// 1.5～2 秒（真机日志实测），而章末连播本来就是「接着播」，没有换容器的
+  /// 必要。
+  Future<void> _advanceInPlace([int? requested]) async {
     final next = requested ?? _index + 1;
     if (next < 0 || next >= _chapters.length || next == _index) return;
     final player = _player;
@@ -1241,7 +1278,8 @@ class _AudioPlaybackController extends ChangeNotifier
     _saveTimer?.cancel();
     final itemId = _chapters[next].itemId;
     try {
-      final source = await _loadSourceWithRetry(itemId);
+      final prefetched = _takeAudioPrefetch(itemId, _toneId);
+      final source = prefetched ?? await _loadSourceWithRetry(itemId);
       if (!_current(generation, player)) return;
       await player.reopen(source.url, source.keyHex);
       if (!_current(generation, player)) return;
@@ -1261,10 +1299,10 @@ class _AudioPlaybackController extends ChangeNotifier
       });
       _publishReadAlong();
       _publishMoreState();
-      // 原地换源之后必须重挂监听：订阅闭包捕获的是创建播放器时的 generation，
-      // 而这里 `++_generation` 已经把它换掉，不重挂的话位置/播放结束/错误事件
-      // 都会被 `_current` 判成过期丢弃——表现为「后台换过一次章之后再也检测
-      // 不到章节结束」。
+      // 原地换源之后必须重挂监听：`_subscribe` 的闭包捕获的是创建播放器时
+      // 的 generation，而这里 `++_generation` 已经把它换掉了，不重挂的话
+      // 位置/播放结束/错误事件都会被 `_current` 判成过期而丢弃——表现就是
+      // 「后台换过一次章之后，之后再也检测不到章节结束」。
       _unsubscribe();
       _subscribe(player, generation);
       unawaited(_loadExcerpt(itemId));
@@ -1296,7 +1334,7 @@ class _AudioPlaybackController extends ChangeNotifier
     if (!_appActive && player != null && player.isCreated) {
       unawaited(IosAudioSession.beginBackgroundWindow());
       try {
-        await _advanceInBackground(target);
+        await _advanceInPlace(target);
       } finally {
         await IosAudioSession.endBackgroundWindow();
       }

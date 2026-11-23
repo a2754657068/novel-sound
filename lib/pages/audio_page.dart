@@ -32,6 +32,7 @@ import '../services/library_store.dart';
 import '../services/listening_session.dart';
 import '../services/media_history_store.dart';
 import '../services/ios_audio_session.dart';
+import '../services/app_log.dart';
 import '../services/native_player.dart';
 import '../services/playback_format.dart';
 import '../services/reader_preferences.dart';
@@ -62,6 +63,7 @@ import 'system_tts_settings_page.dart';
 part 'audio_listening_layout.dart';
 part '../services/audio_playback_guard.dart';
 part '../services/audio_playback_controller.dart';
+part '../services/audio_playback_preload.dart';
 part '../widgets/audio/audio_playback_scope.dart';
 part '../widgets/audio/audio_floating_capsule.dart';
 part '../services/reader_audio_bridge.dart';
@@ -1388,6 +1390,70 @@ class _AudioPageState extends State<AudioPage> {
     );
   }
 
+  /// 「等待时长」选择面板：和「更多」里的开关、设置页共用同一份偏好。
+  Future<void> _showAdvanceDelaySeconds() async {
+    final prefs = AudioPreferences.instance;
+    final current = prefs.advanceDelaySeconds.value;
+    final picked = await showHomeSheet<int>(
+      context: context,
+      title: '连播等待时长',
+      children: [
+        Builder(
+          builder: (sheetContext) {
+            final palette = HomePalette.of(sheetContext);
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final seconds in kAdvanceDelayChoices)
+                  ListTile(
+                    title: Text('$seconds 秒'),
+                    trailing: seconds == current
+                        ? Icon(LucideIcons.check, color: palette.accentText)
+                        : null,
+                    onTap: () => Navigator.pop(sheetContext, seconds),
+                  ),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+    if (!mounted || picked == null) return;
+    await prefs.setAdvanceDelaySeconds(picked);
+  }
+
+  /// 提前预加载的提前量：0 = 关闭。
+  Future<void> _showPreloadLead() async {
+    final prefs = AudioPreferences.instance;
+    final current = prefs.preloadLeadSeconds.value;
+    final picked = await showHomeSheet<int>(
+      context: context,
+      title: '提前加载下一章',
+      children: [
+        Builder(
+          builder: (sheetContext) {
+            final palette = HomePalette.of(sheetContext);
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final seconds in kPreloadLeadChoices)
+                  ListTile(
+                    title: Text(seconds <= 0 ? '关闭' : '本章剩 $seconds 秒时'),
+                    trailing: seconds == current
+                        ? Icon(LucideIcons.check, color: palette.accentText)
+                        : null,
+                    onTap: () => Navigator.pop(sheetContext, seconds),
+                  ),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+    if (!mounted || picked == null) return;
+    await prefs.setPreloadLeadSeconds(picked);
+  }
+
   Future<void> _showMore() async {
     c._publishMoreState();
     await showHomeSheet<void>(
@@ -1568,6 +1634,165 @@ class _AudioPageState extends State<AudioPage> {
                         height: 1,
                         indent: 68,
                         color: palette.line.withValues(alpha: 0.5),
+                      ),
+                      // 连播等待与预加载：官方只有固定倒计时，这里做成可选。
+                      Builder(
+                        builder: (rowContext) {
+                          final prefs = AudioPreferences.instance;
+                          Widget optionRow({
+                            required IconData icon,
+                            required Color tint,
+                            required String title,
+                            required String subtitle,
+                            required Widget trailing,
+                            Key? key,
+                            VoidCallback? onTap,
+                          }) => ListTile(
+                            key: key,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 2,
+                            ),
+                            leading: Container(
+                              width: 38,
+                              height: 38,
+                              decoration: BoxDecoration(
+                                color: tint.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Icon(icon, size: 20, color: tint),
+                            ),
+                            title: Text(
+                              title,
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 15,
+                                color: palette.ink,
+                              ),
+                            ),
+                            subtitle: Text(
+                              subtitle,
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                color: palette.muted,
+                              ),
+                            ),
+                            trailing: trailing,
+                            onTap: onTap,
+                          );
+                          return Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              ValueListenableBuilder<bool>(
+                                valueListenable: prefs.advanceDelayEnabled,
+                                builder: (context, enabled, _) =>
+                                    ValueListenableBuilder<int>(
+                                      valueListenable:
+                                          prefs.advanceDelaySeconds,
+                                      builder: (context, seconds, _) =>
+                                          optionRow(
+                                            key: const ValueKey(
+                                              'audio-advance-delay',
+                                            ),
+                                            icon: LucideIcons.hourglass,
+                                            tint: const Color(0xFF6366F1),
+                                            title: '连播等待',
+                                            subtitle: enabled
+                                                ? '播完后等待 $seconds 秒再切章，期间可点取消'
+                                                : '播完立即切下一章，不再等 3 秒',
+                                            trailing: Switch(
+                                              value: enabled,
+                                              onChanged: (value) => unawaited(
+                                                prefs.setAdvanceDelayEnabled(
+                                                  value,
+                                                ),
+                                              ),
+                                            ),
+                                            onTap: () => unawaited(
+                                              prefs.setAdvanceDelayEnabled(
+                                                !enabled,
+                                              ),
+                                            ),
+                                          ),
+                                    ),
+                              ),
+                              ValueListenableBuilder<bool>(
+                                valueListenable: prefs.advanceDelayEnabled,
+                                builder: (context, enabled, _) => enabled
+                                    ? ValueListenableBuilder<int>(
+                                        valueListenable:
+                                            prefs.advanceDelaySeconds,
+                                        builder: (context, seconds, _) =>
+                                            optionRow(
+                                              key: const ValueKey(
+                                                'audio-advance-seconds',
+                                              ),
+                                              icon: LucideIcons.timer,
+                                              tint: const Color(0xFF0EA5E9),
+                                              title: '等待时长',
+                                              subtitle: '连播前留给「取消」的时间',
+                                              trailing: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Text(
+                                                    '$seconds 秒',
+                                                    style: TextStyle(
+                                                      fontSize: 13,
+                                                      color: palette.muted,
+                                                    ),
+                                                  ),
+                                                  Icon(
+                                                    LucideIcons.chevron_right,
+                                                    size: 18,
+                                                    color: palette.muted,
+                                                  ),
+                                                ],
+                                              ),
+                                              onTap: () => unawaited(
+                                                _showAdvanceDelaySeconds(),
+                                              ),
+                                            ),
+                                      )
+                                    : const SizedBox.shrink(),
+                              ),
+                              ValueListenableBuilder<int>(
+                                valueListenable: prefs.preloadLeadSeconds,
+                                builder: (context, lead, _) => optionRow(
+                                  key: const ValueKey('audio-preload-lead'),
+                                  icon: LucideIcons.cloud_download,
+                                  tint: const Color(0xFF10B981),
+                                  title: '提前加载下一章',
+                                  subtitle: lead <= 0
+                                      ? '已关闭，切章时才取音源'
+                                      : '本章只剩 $lead 秒时预加载下一章，切章更快',
+                                  trailing: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        lead <= 0 ? '关闭' : '$lead 秒',
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          color: palette.muted,
+                                        ),
+                                      ),
+                                      Icon(
+                                        LucideIcons.chevron_right,
+                                        size: 18,
+                                        color: palette.muted,
+                                      ),
+                                    ],
+                                  ),
+                                  onTap: () => unawaited(_showPreloadLead()),
+                                ),
+                              ),
+                              Divider(
+                                height: 1,
+                                indent: 68,
+                                color: palette.line.withValues(alpha: 0.5),
+                              ),
+                            ],
+                          );
+                        },
                       ),
                       ValueListenableBuilder<bool>(
                         valueListenable:

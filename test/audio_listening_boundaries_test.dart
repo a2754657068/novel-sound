@@ -350,6 +350,8 @@ Future<void> _mount(
   Size surfaceSize = const Size(430, 932),
 }) async {
   await tester.binding.setSurfaceSize(surfaceSize);
+  // 这些用例验证的是「连播等待」这条路径；默认已改为立即连播，这里显式开启。
+  await AudioPreferences.instance.setAdvanceDelayEnabled(true);
   var created = 0;
   addTearDown(() async {
     await tester.pumpWidget(const SizedBox.shrink());

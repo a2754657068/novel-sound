@@ -209,6 +209,43 @@ void main() {
     expect(session.players.last.isPlaying, true);
   });
 
+  testWidgets('a disabled advance delay cuts over immediately', (tester) async {
+    final session = _Session();
+    await _mount(tester, session);
+    await AudioPreferences.instance.setAdvanceDelayEnabled(false);
+    session.players.first.emitCompleted();
+    await _flush(tester);
+    // 关闭等待：没有倒计时条，复用同一个播放器原地换源，直接起播下一章。
+    expect(find.byKey(const Key('audio_advance_banner')), findsNothing);
+    expect(session.players, hasLength(1));
+    expect(session.players.single.reopened, hasLength(1));
+    expect(session.players.single.isPlaying, isTrue);
+    // 原地换章由 5 秒一次的存档定时器落盘，不是换章瞬间写。
+    await tester.pump(const Duration(seconds: 6));
+    await _flush(tester);
+    expect(session.store.entry?['chapterId'], '2');
+  });
+
+  testWidgets('a custom advance delay waits the configured seconds', (
+    tester,
+  ) async {
+    final session = _Session();
+    await _mount(tester, session);
+    await AudioPreferences.instance.setAdvanceDelaySeconds(5);
+    session.players.first.emitCompleted();
+    await _flush(tester);
+    expect(find.byKey(const Key('audio_advance_banner')), findsOneWidget);
+    // 3 秒时还在等（旧的固定窗口早就切章了）。
+    await tester.pump(const Duration(seconds: 3));
+    await _flush(tester);
+    expect(session.players, hasLength(1));
+    // 熬到第 5 秒才换章。
+    await tester.pump(const Duration(seconds: 2));
+    await _flush(tester);
+    expect(session.players, hasLength(2));
+    expect(session.store.entry?['chapterId'], '2');
+  });
+
   testWidgets('cancelling the advance countdown stays on the chapter', (
     tester,
   ) async {
@@ -1075,6 +1112,8 @@ Future<void> _mount(
   ThemeData? theme,
 }) async {
   await tester.binding.setSurfaceSize(const Size(430, 932));
+  // 连播相关用例需要倒计时窗口存在；默认已改为立即连播。
+  await AudioPreferences.instance.setAdvanceDelayEnabled(true);
   tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
   addTearDown(() async {
     await _unmount(tester);

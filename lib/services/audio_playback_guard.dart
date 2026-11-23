@@ -130,13 +130,24 @@ void _onChapterFinished(
       // 让「取音源 + 建播放器 + 起播」跑完再还回去。
       unawaited(IosAudioSession.beginBackgroundWindow());
       unawaited(
-        c
-            ._advanceInBackground()
-            .whenComplete(IosAudioSession.endBackgroundWindow),
+        c._advanceInPlace().whenComplete(IosAudioSession.endBackgroundWindow),
       );
       return;
     }
-    _beginAdvanceCountdown(c);
+    // 倒计时只留给前台（那里用户可能想取消连播）。等待开关与秒数都可在
+    // 「更多 → 连播等待」和「设置 → 听书」里改；关闭时直接切章。
+    if (!AudioPreferences.instance.advanceDelayEnabled.value) {
+      // 立即连播：复用现有播放器原地换源。冷启一个 mpv 要 1.5～2 秒，
+      // `reopen` 只需要几百毫秒。让出一个 microtask 再切，避免和完成回调
+      // 后面的收尾（发布会话、标记已播完）打架。
+      final next = c._index + 1;
+      unawaited(Future<void>.microtask(() => c._advanceInPlace(next)));
+      return;
+    }
+    _beginAdvanceCountdown(
+      c,
+      seconds: AudioPreferences.instance.advanceDelaySeconds.value,
+    );
     return;
   }
   unawaited(c._pause(player, generation));

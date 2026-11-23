@@ -10,6 +10,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// 智能朗读不受它影响。
 enum ListenEngine { smart, system }
 
+/// 章末连播等待的可选秒数（「更多」面板与设置页共用同一份清单）。
+const List<int> kAdvanceDelayChoices = <int>[1, 2, 3, 5, 8, 10, 15];
+
+/// 提前预加载的可选提前量（秒）。0 表示不预加载。
+const List<int> kPreloadLeadChoices = <int>[0, 5, 10, 15, 20, 30];
+
 /// 听书相关配置与持久化偏好设置。
 class AudioPreferences {
   AudioPreferences._();
@@ -27,6 +33,15 @@ class AudioPreferences {
 
   /// 睡眠定时选的是「听完本章」而不是分钟档（官方 `cip`）。
   static const _sleepAtChapterEndKey = 'audio_sleep_at_chapter_end';
+
+  /// 章末连播是否等待：关闭（默认）就播完立即切下一章。
+  static const _advanceDelayEnabledKey = 'audio_advance_delay_enabled';
+
+  /// 章末连播等待的秒数（开启等待时才用）。
+  static const _advanceDelaySecondsKey = 'audio_advance_delay_seconds';
+
+  /// 提前多少秒预加载下一章（0 = 关闭预加载）。
+  static const _preloadLeadKey = 'audio_next_chapter_preload_seconds';
 
   /// 跳过片头 / 片尾按书存，单位秒；没有记录就是 0（不跳）。
   static const _skipIntroPrefix = 'audio_skip_intro_';
@@ -59,6 +74,18 @@ class AudioPreferences {
   /// 倍速是否已锁定。锁定期间点倍速项只提示、不弹面板。
   bool rateLocked = false;
 
+  /// 章末连播是否等待（默认关：播完立即连播）。
+  ///
+  /// 打开后 [advanceDelaySeconds] 生效，前台会在章末倒计时，用户可点取消；
+  /// 后台仍立即连播——iOS 挂起进程时定时器不会走。
+  final ValueNotifier<bool> advanceDelayEnabled = ValueNotifier<bool>(false);
+
+  /// 章末连播的等待秒数，1–15 秒，默认 3。
+  final ValueNotifier<int> advanceDelaySeconds = ValueNotifier<int>(3);
+
+  /// 提前多少秒预加载下一章，0 表示不预加载，默认 10 秒。
+  final ValueNotifier<int> preloadLeadSeconds = ValueNotifier<int>(10);
+
   /// 睡眠定时是否停在「听完本章」。与分钟档互斥。
   bool sleepAtChapterEnd = false;
 
@@ -77,6 +104,13 @@ class AudioPreferences {
       rateEngine.value = AudioRateEngine.fromName(sp.getString(_rateEngineKey));
       rateLocked = sp.getBool(_rateLockedKey) ?? false;
       sleepAtChapterEnd = sp.getBool(_sleepAtChapterEndKey) ?? false;
+      advanceDelayEnabled.value = sp.getBool(_advanceDelayEnabledKey) ?? false;
+      advanceDelaySeconds.value = _clampAdvanceDelay(
+        sp.getInt(_advanceDelaySecondsKey) ?? 3,
+      );
+      preloadLeadSeconds.value = _clampPreloadLead(
+        sp.getInt(_preloadLeadKey) ?? 10,
+      );
       listenEngine.value = sp.getString(_listenEngineKey) == 'system'
           ? ListenEngine.system
           : ListenEngine.smart;
@@ -94,6 +128,9 @@ class AudioPreferences {
     rateLocked = false;
     sleepAtChapterEnd = false;
     listenEngine.value = ListenEngine.smart;
+    advanceDelayEnabled.value = false;
+    advanceDelaySeconds.value = 3;
+    preloadLeadSeconds.value = 10;
     _skipIntro.clear();
     _skipOutro.clear();
     _skipLoaded.clear();
@@ -159,6 +196,55 @@ class AudioPreferences {
     } catch (_) {
       // 忽略持久化失败
     }
+  }
+
+  /// 连播等待开关。关闭后章末立即切章。
+  Future<void> setAdvanceDelayEnabled(bool value) async {
+    advanceDelayEnabled.value = value;
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.setBool(_advanceDelayEnabledKey, value);
+    } catch (_) {
+      // 忽略持久化失败
+    }
+  }
+
+  Future<void> setAdvanceDelaySeconds(int seconds) async {
+    final value = _clampAdvanceDelay(seconds);
+    advanceDelaySeconds.value = value;
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.setInt(_advanceDelaySecondsKey, value);
+    } catch (_) {
+      // 忽略持久化失败
+    }
+  }
+
+  /// 提前预加载的提前量；0 = 关闭。取整到可选项上，避免脏值。
+  Future<void> setPreloadLeadSeconds(int seconds) async {
+    final value = _clampPreloadLead(seconds);
+    preloadLeadSeconds.value = value;
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.setInt(_preloadLeadKey, value);
+    } catch (_) {
+      // 忽略持久化失败
+    }
+  }
+
+  static int _clampAdvanceDelay(int seconds) =>
+      seconds < 1 ? 1 : (seconds > 15 ? 15 : seconds);
+
+  static int _clampPreloadLead(int seconds) {
+    if (seconds <= 0) return 0;
+    var best = kPreloadLeadChoices.last;
+    for (final choice in kPreloadLeadChoices) {
+      if (seconds <= choice) {
+        best = choice;
+        break;
+      }
+    }
+    return best;
   }
 
   Future<void> setBackgroundPlayback(bool value) async {

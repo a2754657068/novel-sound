@@ -132,6 +132,8 @@ class SettingsPage extends StatelessWidget {
         subtitle: '后台播放、通知栏控制与系统朗读',
         items: [
           _backgroundAudioItem(),
+          _advanceDelayItem(),
+          _preloadLeadItem(),
           if (!isMediaDesktop) _audioRateEngineItem(),
           SettingsItem(
             icon: CupertinoIcons.mic,
@@ -509,8 +511,65 @@ class SettingsPage extends StatelessWidget {
     ),
   );
 
-  /// 听书倍速的变速实现（issue #129）：默认交给系统混音器，高倍速下明显
-  /// 没那么「电音」；内建 Sonic 作为厂商实现异常时的回退档。
+  /// 连播等待：开关 + 秒数。与听书页「更多」面板共用同一份偏好。
+  SettingsItem _advanceDelayItem() => SettingsItem(
+    icon: CupertinoIcons.timer,
+    title: '连播等待',
+    rowBuilder: (context) => ValueListenableBuilder<bool>(
+      valueListenable: AudioPreferences.instance.advanceDelayEnabled,
+      builder: (context, enabled, _) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SettingsToggleRow(
+            icon: CupertinoIcons.timer,
+            title: '连播等待',
+            description: enabled
+                ? '章末等待后可取消连播；后台仍会立即续播以免断流'
+                : '播完立即切下一章（后台同样立即续播）',
+            value: enabled,
+            onChanged: AudioPreferences.instance.setAdvanceDelayEnabled,
+          ),
+          if (enabled)
+            ValueListenableBuilder<int>(
+              valueListenable: AudioPreferences.instance.advanceDelaySeconds,
+              builder: (context, seconds, _) => GlassSettingMenu<int>(
+                icon: CupertinoIcons.hourglass,
+                label: '等待时长',
+                value: seconds,
+                options: {
+                  for (final choice in kAdvanceDelayChoices)
+                    choice: '$choice 秒',
+                },
+                reduceMotion: MediaQuery.disableAnimationsOf(context),
+                onChanged: AudioPreferences.instance.setAdvanceDelaySeconds,
+              ),
+            ),
+        ],
+      ),
+    ),
+  );
+
+  /// 提前预加载下一章：0 = 关闭。
+  SettingsItem _preloadLeadItem() => SettingsItem(
+    icon: CupertinoIcons.arrow_down_to_line,
+    title: '提前加载下一章',
+    rowBuilder: (context) => ValueListenableBuilder<int>(
+      valueListenable: AudioPreferences.instance.preloadLeadSeconds,
+      builder: (context, lead, _) => GlassSettingMenu<int>(
+        icon: CupertinoIcons.arrow_down_to_line,
+        label: '提前加载下一章',
+        value: lead,
+        options: {
+          for (final choice in kPreloadLeadChoices)
+            choice: choice <= 0 ? '关闭' : '$choice 秒',
+        },
+        reduceMotion: MediaQuery.disableAnimationsOf(context),
+        onChanged: AudioPreferences.instance.setPreloadLeadSeconds,
+      ),
+    ),
+  );
+
+  /// 听书倍速的变速实现（issue #129）：默认交给系统混音器，高倍速下明显  /// 没那么「电音」；内建 Sonic 作为厂商实现异常时的回退档。
   ///
   /// 与「视频解码器」同理：audio sink 在 build 时定型，新建播放器才生效。
   SettingsItem _audioRateEngineItem() => SettingsItem(

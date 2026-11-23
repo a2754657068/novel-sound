@@ -36,6 +36,33 @@ void main() {
     expect(AudioPreferences.instance.backgroundPlayback.value, false);
   });
 
+  test('advance delay defaults to off and keeps three seconds', () {
+    expect(AudioPreferences.instance.advanceDelayEnabled.value, false);
+    expect(AudioPreferences.instance.advanceDelaySeconds.value, 3);
+  });
+
+  test('advance delay preference round-trips and clamps seconds', () async {
+    await AudioPreferences.instance.setAdvanceDelayEnabled(true);
+    await AudioPreferences.instance.setAdvanceDelaySeconds(99);
+    expect(AudioPreferences.instance.advanceDelayEnabled.value, true);
+    expect(AudioPreferences.instance.advanceDelaySeconds.value, 15);
+
+    AudioPreferences.instance.resetForTest();
+    await AudioPreferences.instance.load();
+    expect(AudioPreferences.instance.advanceDelayEnabled.value, true);
+    expect(AudioPreferences.instance.advanceDelaySeconds.value, 15);
+  });
+
+  test('preload lead snaps to a choice and zero disables it', () async {
+    expect(AudioPreferences.instance.preloadLeadSeconds.value, 10);
+    await AudioPreferences.instance.setPreloadLeadSeconds(7);
+    expect(AudioPreferences.instance.preloadLeadSeconds.value, 10);
+    await AudioPreferences.instance.setPreloadLeadSeconds(0);
+    expect(AudioPreferences.instance.preloadLeadSeconds.value, 0);
+    await AudioPreferences.instance.setPreloadLeadSeconds(99);
+    expect(AudioPreferences.instance.preloadLeadSeconds.value, 30);
+  });
+
   // issue #170：1.0.133 把听书默认变速引擎改成 WSOLA（FFmpeg atempo 移植）
   // 后，部分设备一直停在「缓冲中」且没有任何声音；1.0.121 正常。默认先退回
   // 内建 Sonic（1.0.121 的行为），WSOLA 只作为设置里的可选项。

@@ -335,6 +335,23 @@ class FakeNativePlayer extends NativePlayer {
     return 1;
   }
 
+  /// `reopen` 收到的地址（按序）：断言原地换章复用了同一个播放器。
+  final reopened = <String>[];
+
+  /// 类似生产行为：换源后回到 paused，等 [play] 再起播。
+  @override
+  Future<void> reopen(String cdnUrl, String keyHex) async {
+    calls.add('reopen:$cdnUrl');
+    createdKeys.add(keyHex);
+    reopened.add(cdnUrl);
+    currentPosition = Duration.zero;
+    totalDuration = const Duration(minutes: 2);
+    isPlaying = false;
+    playbackRequested = false;
+    playingEvents.add(false);
+    playWhenReadyEvents.add(false);
+  }
+
   @override
   Future<void> play() async {
     calls.add('play');
